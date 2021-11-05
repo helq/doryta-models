@@ -11,7 +11,7 @@ on any of them:
 
 from __future__ import annotations
 
-from typing import Any, Tuple, BinaryIO
+from typing import Any, Tuple, BinaryIO, Dict
 import os
 # import sys
 import numpy as np
@@ -146,7 +146,7 @@ def save_model_for_doryta(model: Any, path: str) -> None:
             f.write(struct.pack('>f', 0))    # current
             f.write(struct.pack('>f', 0))    # resting_potential
             f.write(struct.pack('>f', 0))    # reset_potential
-            f.write(struct.pack('>f', 0.5 + bias))  # threshold
+            f.write(struct.pack('>f', 0.5 - bias))  # threshold
             f.write(struct.pack('>f', 1/256))  # tau_m
             f.write(struct.pack('>f', 1))    # resistance
 
@@ -227,23 +227,51 @@ def save_tags_for_doryta(tags: Any, path: str) -> None:
         tags.argmax(axis=1).astype('b').tofile(fp)
 
 
-def show_prediction(model: Any, img: Any) -> None:
-    new_model = Model(inputs=model.inputs,
-                      outputs=[model.layers[1].output, model.layers[-2].output])
+# This is just to make Keras happy so that I don't create multiple models, one per run.
+# Keras despices that apparently
+models_intermediate: Dict[Any, Any] = {}
 
-    [img_spiked, output_spike] = new_model.predict(img)
+
+def show_prediction(model: Any, img: Any, show_all_layers: bool = False) -> None:
+    global models_intermediate
+    if model in models_intermediate:
+        new_model = models_intermediate[model]
+    else:
+        new_model = Model(inputs=model.inputs,
+                          outputs=[model.layers[2*i + 1].output for i in range(3)])
+        models_intermediate[model] = new_model
+
+    output_layers = new_model.predict(img)
+    output_spike = output_layers[-1]
+
+    if show_all_layers:
+        # Checking other things model
+        img_spiked = output_layers[0]
+        print("Spikes on first layer:")
+        print(img_spiked)
+        print("Spikes at (shifted): ", np.argwhere(img_spiked.flatten()).flatten() + 28*28)
+
+        # Checking other things model
+        img_spiked = output_layers[1]
+        print("Spikes on second layer:")
+        print(img_spiked)
+        print("Spikes at (shifted): ",
+              np.argwhere(img_spiked.flatten()).flatten() + 28*28 + 256)
+
+        # print("Input for network as intesity spikes (too large to show properly):")
+        # print(spikes_before_bias)
+        # with np.printoptions(threshold=sys.maxsize):
+        #     print(spikes_before_bias)
 
     print("Predicted value:", model.predict(img).argmax(1))
 
     print("Predicted value (spike output):")
     print(output_spike.reshape((-1, 10, 10)))
 
-    print("Spikes at: ", np.where(output_spike.flatten() == 1)[0] + 28*28 + 256 + 64)
+    out_spikes_num = np.argwhere(output_spike.flatten() == 1).flatten()
+    print("Spikes at (shifted): ", out_spikes_num + 28*28 + 256 + 64)
+    print("Spikes at: ", out_spikes_num)
     plot_img(img)
-
-    # Checking other things model
-    # print("Spikes after first layer:")
-    # print(img_spiked)
 
     # w0, b0 = model.layers[0].get_weights()
     # spikes_before_bias = w0 * img.reshape((28*28, 1))
@@ -252,21 +280,16 @@ def show_prediction(model: Any, img: Any) -> None:
     # assert((img_spiked == img_spiked2).all())
     # assert((img_spiked == img_spiked3).all())
 
-    # print("Input for network as intesity spikes (too large to show properly):")
-    # print(spikes_before_bias)
-    # with np.printoptions(threshold=sys.maxsize):
-    #     print(spikes_before_bias)
-
 
 if __name__ == '__main__':  # noqa: C901
     # This is super good but produces negative values for the matrix, ie, negative currents :S
     initializer = 'glorot_uniform'
     # initializer = RandomUniform(minval=0.0, maxval=1.0)
 
-    loading_model = False
+    loading_model = True
     train_model = False
-    checking_model = False
-    save_model = False
+    checking_model = True
+    save_model = True
 
     model_path = '../keras-simple-mnist'
 
@@ -290,9 +313,11 @@ if __name__ == '__main__':  # noqa: C901
             print("Evaluating model (loss, accuracy):", model.evaluate(x_test, y_test))
             # new model allows us to extract the results of a layer
 
-            i = np.random.randint(0, x_test.shape[0]-1)
-            img = x_test[i:i+1]
-            show_prediction(model, img)
+            imgs = (x_test > .5).astype(float)  # type: ignore
+            prediction = model.predict(imgs).argmax(axis=1)
+            correct_predictions = (prediction == y_test.argmax(axis=1)).sum()
+            print("Evaluating model (accuracy on black&white images):",
+                  correct_predictions / imgs.shape[0])
 
         # Saving doryta model to memory
         if save_model:
