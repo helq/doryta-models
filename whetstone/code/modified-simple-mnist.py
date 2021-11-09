@@ -11,7 +11,7 @@ on any of them:
 
 from __future__ import annotations
 
-from typing import Any, Tuple, BinaryIO, Dict
+from typing import Any, Tuple, BinaryIO
 import os
 # import sys
 import numpy as np
@@ -60,7 +60,7 @@ def my_key() -> np.ndarray:  # type: ignore
 
 
 def create_model(initializer: Any = 'glorot_uniform',
-                 use_my_key: bool = False) -> Any:
+                 use_my_key: bool = True) -> Any:
     if use_my_key:
         key = my_key()
     else:
@@ -74,6 +74,12 @@ def create_model(initializer: Any = 'glorot_uniform',
     model.add(Dense(100, kernel_initializer=initializer))
     model.add(Spiking_BRelu())  # type: ignore
     model.add(Softmax_Decode(key))  # type: ignore
+
+    # Disabling training of Softmax Decode layer. I really don't need any of its magic as
+    # it obfuscates the inference process (and I would have to carry around the keras
+    # model, or the trained key, in order to make sense of the SNN output). This is also
+    # the reason why `use_my_key` is True by default
+    model.layers[-1].trainable = False
 
     return model
 
@@ -131,9 +137,9 @@ def save_model_for_doryta(model: Any, path: str) -> None:
         #    + float potential = 0;          // V
         #    + float current = 0;            // I(t)
         #    + float resting_potential = 0;  // V_e
-        #    + float reset_potential = 0;    // V_e
-        #    + float threshold = 0.5;        // V_th
-        #    + float tau_m = 1/dt = 256;     // C * R
+        #    + float reset_potential = 0;    // V_r
+        #    + float threshold = 0.5 - bias; // V_th
+        #    + float tau_m = dt = 1/256;     // C * R
         #    + float resistance = 1;         // R
         #  - Synapses for neuron:
         #    + Number of synapses (M)
@@ -180,7 +186,12 @@ def save_model_for_doryta(model: Any, path: str) -> None:
             fh.write(struct.pack('>i', 0))   # number of synapses
 
 
-def save_spikes_for_doryta(img: np.ndarray[Any, Any], path: str, format: int = 2) -> None:
+def save_spikes_for_doryta(
+    img: np.ndarray[Any, Any],
+    path: str,
+    format: int = 2,
+    shift: float = 0.0
+) -> None:
     assert(len(img.shape) == 2)
     assert(img.shape[1] == 28*28)
     with open(f"{path}.bin", 'wb') as fh:
@@ -217,7 +228,7 @@ def save_spikes_for_doryta(img: np.ndarray[Any, Any], path: str, format: int = 2
                 # - Number of spikes for neuron
                 fh.write(struct.pack('>i', n_spikes_per_neuron[neuron_i]))
                 # - Neuron ids
-                np.flatnonzero(img[:, neuron_i]).astype('>f4').tofile(fh)
+                (np.flatnonzero(img[:, neuron_i]).astype('>f4') + shift).tofile(fh)  # type: ignore
         else:
             raise Exception("No other way to store spikes has been defined yet")
 
@@ -227,21 +238,20 @@ def save_tags_for_doryta(tags: Any, path: str) -> None:
         tags.argmax(axis=1).astype('b').tofile(fp)
 
 
-# This is just to make Keras happy so that I don't create multiple models, one per run.
-# Keras despices that apparently
-models_intermediate: Dict[Any, Any] = {}
+def load_models(path: str) -> Tuple[Any, Any]:
+    model = load_model(path)
+    model_intermediate = Model(
+        inputs=model.inputs,
+        outputs=[model.layers[2*i + 1].output for i in range(3)])
+    return model, model_intermediate
 
 
-def show_prediction(model: Any, img: Any, show_all_layers: bool = False) -> None:
-    global models_intermediate
-    if model in models_intermediate:
-        new_model = models_intermediate[model]
-    else:
-        new_model = Model(inputs=model.inputs,
-                          outputs=[model.layers[2*i + 1].output for i in range(3)])
-        models_intermediate[model] = new_model
+def show_prediction(
+    model: Any, model_intermediate: Any,
+    img: Any, show_all_layers: bool = False
+) -> None:
 
-    output_layers = new_model.predict(img)
+    output_layers = model_intermediate.predict(img)
     output_spike = output_layers[-1]
 
     if show_all_layers:
@@ -281,6 +291,17 @@ def show_prediction(model: Any, img: Any, show_all_layers: bool = False) -> None
     # assert((img_spiked == img_spiked3).all())
 
 
+def save_spikes_slice(x_test: Any, y_test: Any, sl: slice) -> None:
+    if sl.start:
+        name = f"../spikified-mnist/spikified-images-{sl.start}-to-{sl.stop}"
+    else:
+        name = f"../spikified-mnist/spikified-images-{sl.stop}"
+    img = (x_test[sl] > .5).astype(int)
+    save_spikes_for_doryta(img, name)
+    save_tags_for_doryta(y_test[sl], name)
+    print("Classes of images:", y_test[sl].argmax(axis=1))
+
+
 if __name__ == '__main__':  # noqa: C901
     # This is super good but produces negative values for the matrix, ie, negative currents :S
     initializer = 'glorot_uniform'
@@ -289,17 +310,17 @@ if __name__ == '__main__':  # noqa: C901
     loading_model = True
     train_model = False
     checking_model = True
-    save_model = True
+    save_model = False
 
     model_path = '../keras-simple-mnist'
 
     (x_train, y_train), (x_test, y_test) = load_data()
 
     if loading_model:
-        model = load_model(model_path)
+        model, model_intermediate = load_models(model_path)
 
     elif train_model:
-        model = create_model(initializer=initializer, use_my_key=True)
+        model = create_model(initializer=initializer)
         callbacks = create_callbacks()
 
         model.compile(loss='categorical_crossentropy', optimizer=Adadelta(
@@ -325,23 +346,18 @@ if __name__ == '__main__':  # noqa: C901
 
     # Saving first 20 images in testing dataset
     if False:
-        # i = np.random.randint(0, x_test.shape[0]-1)
-        # img = (x_test[i:i+1] > .5).astype(int)
-        # klass = y_test[i].argmax()
-        img = (x_test[:20] > .5).astype(int)
-        save_spikes_for_doryta(img, "../spikified-mnist/spikified-images-20")
-        save_tags_for_doryta(y_test[:20], "../spikified-mnist/spikified-images-20")
-        print("Classes of images:", y_test[:20].argmax(axis=1))
+        # save_spikes_slice(x_test, y_test, slice(20))
+        save_spikes_slice(x_test, y_test, slice(1950, 2000))
 
     # Saving all images as spikes
     if False:
         range_ = ...
-        path = "../spikified-mnist/spikified-images-all"
+        path = "../spikified-mnist/spikified-images-all-shifted"
 
         imgs = (x_test[range_] > .5).astype(int)
         print("Total images:", y_test[range_].shape[0])
 
-        save_spikes_for_doryta(imgs, path)
+        save_spikes_for_doryta(imgs, path, shift=.00001)
         save_tags_for_doryta(y_test[range_], path)
 
         print(f"Spikified images stored to `{path}.bin` and "
@@ -356,3 +372,10 @@ if __name__ == '__main__':  # noqa: C901
         print("Classes of images:", klass)
         if loading_model or train_model:
             show_prediction(model, img)
+
+    # Checking a single model
+    if False:
+        i = 43
+        print("Classes of images:", y_test[i].argmax())
+        if loading_model:
+            show_prediction(model, model_intermediate, (x_test[i:i+1] > .5).astype(int))
