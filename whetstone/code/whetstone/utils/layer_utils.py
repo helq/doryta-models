@@ -5,7 +5,7 @@ import numpy as np
 import keras.backend as K
 from tensorflow.keras.utils import CustomObjectScope
 
-from whetstone.layers import spikingLayersDict, Spiking
+from ..layers import spikingLayersDict, Spiking
 
 
 def load_model(filepath):

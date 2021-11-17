@@ -1,4 +1,6 @@
 """
+Simple Feed-forward Spiking Neural Network for MNIST
+
 This file implements a SNN model using whetstone and keras. The "main" is in charge of
 everything. Each of the following options can be activated by switching from False to True
 on any of them:
@@ -11,7 +13,8 @@ on any of them:
 
 from __future__ import annotations
 
-from typing import Any, Tuple, BinaryIO
+from typing import Any, Tuple, BinaryIO, Union
+import pathlib
 import os
 # import sys
 import numpy as np
@@ -29,8 +32,8 @@ from tensorflow.keras.optimizers import Adadelta
 from tensorflow.keras import Model
 # from tensorflow.keras.initializers import RandomUniform
 
-from whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
-from whetstone.callbacks import SimpleSharpener, WhetstoneLogger
+from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
+from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
 
 
 def load_data(
@@ -60,7 +63,7 @@ def my_key() -> np.ndarray:  # type: ignore
 
 
 def create_model(initializer: Any = 'glorot_uniform',
-                 use_my_key: bool = True) -> Any:
+                 use_my_key: bool = True) -> Tuple[Any, Any]:
     if use_my_key:
         key = my_key()
     else:
@@ -81,7 +84,11 @@ def create_model(initializer: Any = 'glorot_uniform',
     # the reason why `use_my_key` is True by default
     model.layers[-1].trainable = False
 
-    return model
+    model_intermediate = Model(
+        inputs=model.inputs,
+        outputs=[model.layers[2*i + 1].output for i in range(3)])
+
+    return model, model_intermediate
 
 
 def create_callbacks() -> Any:
@@ -186,6 +193,10 @@ def save_model_for_doryta(model: Any, path: str) -> None:
             fh.write(struct.pack('>i', 0))   # number of synapses
 
 
+# NOTE: shift cannot be arbitrarily small because time stamps are being stored as 32-bit
+# floating point numbers! A small number like 0.00001 will dissapear when added up to
+# 4000. I thought 32-bits were enough for those kind of computations, they are not. This
+# might be the root of many subtle bugs, dammit
 def save_spikes_for_doryta(
     img: np.ndarray[Any, Any],
     path: str,
@@ -227,8 +238,8 @@ def save_spikes_for_doryta(
                 fh.write(struct.pack('>i', neuron_i))
                 # - Number of spikes for neuron
                 fh.write(struct.pack('>i', n_spikes_per_neuron[neuron_i]))
-                # - Neuron ids
-                (np.flatnonzero(img[:, neuron_i]).astype('>f4') + shift).tofile(fh)  # type: ignore
+                # - Neuron times
+                (np.flatnonzero(img[:, neuron_i]) + shift).astype('>f4').tofile(fh)  # type: ignore
         else:
             raise Exception("No other way to store spikes has been defined yet")
 
@@ -238,7 +249,7 @@ def save_tags_for_doryta(tags: Any, path: str) -> None:
         tags.argmax(axis=1).astype('b').tofile(fp)
 
 
-def load_models(path: str) -> Tuple[Any, Any]:
+def load_models(path: Union[str, pathlib.Path]) -> Tuple[Any, Any]:
     model = load_model(path)
     model_intermediate = Model(
         inputs=model.inputs,
@@ -309,7 +320,7 @@ if __name__ == '__main__':  # noqa: C901
 
     loading_model = True
     train_model = False
-    checking_model = True
+    checking_model = False
     save_model = False
 
     model_path = '../keras-simple-mnist'
@@ -320,7 +331,7 @@ if __name__ == '__main__':  # noqa: C901
         model, model_intermediate = load_models(model_path)
 
     elif train_model:
-        model = create_model(initializer=initializer)
+        model, model_intermediate = create_model(initializer=initializer)
         callbacks = create_callbacks()
 
         model.compile(loss='categorical_crossentropy', optimizer=Adadelta(
@@ -350,14 +361,14 @@ if __name__ == '__main__':  # noqa: C901
         save_spikes_slice(x_test, y_test, slice(1950, 2000))
 
     # Saving all images as spikes
-    if False:
+    if True:
         range_ = ...
         path = "../spikified-mnist/spikified-images-all-shifted"
 
         imgs = (x_test[range_] > .5).astype(int)
         print("Total images:", y_test[range_].shape[0])
 
-        save_spikes_for_doryta(imgs, path, shift=.00001)
+        save_spikes_for_doryta(imgs, path, shift=.01)
         save_tags_for_doryta(y_test[range_], path)
 
         print(f"Spikified images stored to `{path}.bin` and "
