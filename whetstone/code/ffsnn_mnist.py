@@ -20,20 +20,19 @@ import os
 import numpy as np
 import struct
 
-import matplotlib.pyplot as plt
-
 # import keras
-from tensorflow.keras.datasets import mnist
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.models import load_model
-from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.optimizers import Adadelta
 from tensorflow.keras import Model
-# from tensorflow.keras.initializers import RandomUniform
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.utils import to_categorical
 
 from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
 from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
+
+from .common_mnist import my_key, plot_img
 
 
 def load_data(
@@ -53,13 +52,6 @@ def load_data(
     x_train = np.reshape(x_train, (60000, 28*28))
     x_test = np.reshape(x_test, (10000, 28*28))
     return (x_train, y_train), (x_test, y_test)
-
-
-def my_key() -> np.ndarray:  # type: ignore
-    key = np.zeros((10, 100))
-    for i in range(10):
-        key[i, i*10: (i+1)*10] = 1
-    return key
 
 
 def create_model(initializer: Any = 'glorot_uniform',
@@ -102,11 +94,6 @@ def create_callbacks() -> Any:
     logger = WhetstoneLogger(logdir=log_dir, sharpener=simple)  # type: ignore
 
     return [simple, logger]
-
-
-def plot_img(img: np.ndarray) -> None:  # type: ignore
-    plt.imshow(img.reshape((28, 28)))
-    plt.show()
 
 
 def save_model_for_doryta(model: Any, path: str) -> None:
@@ -304,9 +291,9 @@ def show_prediction(
 
 def save_spikes_slice(x_test: Any, y_test: Any, sl: slice) -> None:
     if sl.start:
-        name = f"../spikified-mnist/spikified-images-{sl.start}-to-{sl.stop}"
+        name = f"spikified-mnist/spikified-images-{sl.start}-to-{sl.stop}"
     else:
-        name = f"../spikified-mnist/spikified-images-{sl.stop}"
+        name = f"spikified-mnist/spikified-images-{sl.stop}"
     img = (x_test[sl] > .5).astype(int)
     save_spikes_for_doryta(img, name)
     save_tags_for_doryta(y_test[sl], name)
@@ -323,7 +310,7 @@ if __name__ == '__main__':  # noqa: C901
     checking_model = False
     save_model = False
 
-    model_path = '../keras-simple-mnist'
+    model_path = 'keras-simple-mnist'
 
     (x_train, y_train), (x_test, y_test) = load_data()
 
@@ -353,7 +340,7 @@ if __name__ == '__main__':  # noqa: C901
 
         # Saving doryta model to memory
         if save_model:
-            save_model_for_doryta(model, "../simple-mnist.doryta.bin")
+            save_model_for_doryta(model, "simple-mnist.doryta.bin")
 
     # Saving first 20 images in testing dataset
     if False:
@@ -363,7 +350,7 @@ if __name__ == '__main__':  # noqa: C901
     # Saving all images as spikes
     if True:
         range_ = ...
-        path = "../spikified-mnist/spikified-images-all-shifted"
+        path = "spikified-mnist/spikified-images-all-shifted"
 
         imgs = (x_test[range_] > .5).astype(int)
         print("Total images:", y_test[range_].shape[0])
@@ -379,7 +366,7 @@ if __name__ == '__main__':  # noqa: C901
         i = np.random.randint(0, x_test.shape[0]-1)
         img = (x_test[i:i+1] > .5).astype(int)
         klass = y_test[i].argmax()
-        save_spikes_for_doryta(img, f"../spikified-mnist/spikified-images-class={klass}", format=1)
+        save_spikes_for_doryta(img, f"spikified-mnist/spikified-images-class={klass}", format=1)
         print("Classes of images:", klass)
         if loading_model or train_model:
             show_prediction(model, img)
