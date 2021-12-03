@@ -51,10 +51,14 @@ def create_model(initializer: Any = 'glorot_uniform',
     else:
         key = key_generator(num_classes=10, width=100)
 
+    # Original implementation from:
+    # https://www.kaggle.com/curiousprogrammer/lenet-5-cnn-with-keras-99-48/notebook
     model = Sequential()
+    # stride = 2
     model.add(Conv2D(filters=32, kernel_size=(5, 5), padding='same', input_shape=(28, 28, 1)))
     model.add(Spiking_BRelu())  # type: ignore
     model.add(MaxPool2D(strides=2))
+    # stride = 0
     model.add(Conv2D(filters=48, kernel_size=(5, 5), padding='valid'))
     model.add(Spiking_BRelu())  # type: ignore
     model.add(MaxPool2D(strides=2))
@@ -135,6 +139,7 @@ if __name__ == '__main__':
 
     if loading_model or train_model:
         if checking_model:
+            model.summary()
             print("Evaluating model (loss, accuracy):", model.evaluate(x_test, y_test))
             # new model allows us to extract the results of a layer
 

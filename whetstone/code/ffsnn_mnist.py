@@ -307,7 +307,7 @@ if __name__ == '__main__':  # noqa: C901
 
     loading_model = True
     train_model = False
-    checking_model = False
+    checking_model = True
     save_model = False
 
     model_path = 'keras-simple-mnist'
@@ -329,6 +329,7 @@ if __name__ == '__main__':  # noqa: C901
 
     if loading_model or train_model:
         if checking_model:
+            model.summary()
             print("Evaluating model (loss, accuracy):", model.evaluate(x_test, y_test))
             # new model allows us to extract the results of a layer
 
@@ -348,7 +349,7 @@ if __name__ == '__main__':  # noqa: C901
         save_spikes_slice(x_test, y_test, slice(1950, 2000))
 
     # Saving all images as spikes
-    if True:
+    if False:
         range_ = ...
         path = "spikified-mnist/spikified-images-all-shifted"
 
