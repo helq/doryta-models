@@ -11,7 +11,7 @@ def save_spikes_for_doryta(
     times: np.ndarray[Any, Any],
     path: str
 ) -> None:
-    """Saves sequence of spikes for each "image" (2st dimension) at their given
+    """Saves sequence of spikes for each "image" (2nd dimension) at their given
     timestamps (times). Assumes spikes to be encoded as ones and not spikes as zero."""
     assert(len(img.shape) == 2)
     assert(len(times.shape) == 1)
@@ -44,4 +44,9 @@ if __name__ == '__main__':
     ], dtype=int)
 
     times = np.array([0.1, 0.2, 0.52])
-    save_spikes_for_doryta(img, times, "five-neurons-spikes")
+    save_spikes_for_doryta(img, times, "four-spikes")
+
+    save_spikes_for_doryta(
+        np.zeros((0, 5), dtype=int),
+        np.zeros((0,)),
+        "no-spikes")

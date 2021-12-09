@@ -41,3 +41,9 @@ if __name__ == '__main__':
     save_spikes_for_doryta(insert_pattern(np.array(
         [[1, 1, 1]]
     )), times, "gol-blinker")
+
+    save_spikes_for_doryta(insert_pattern(np.array(
+        [[0, 0, 0, 0, 0, 0, 1, 0],
+         [1, 1, 0, 0, 0, 0, 0, 0],
+         [0, 1, 0, 0, 0, 1, 1, 1]]
+    )), times, "gol-die-hard")

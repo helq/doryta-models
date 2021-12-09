@@ -1,4 +1,4 @@
-from generic_code.spikes import save_spikes_for_doryta
+from utils_doryta.spikes import save_spikes_for_doryta
 
 import numpy as np
 
@@ -25,8 +25,3 @@ if __name__ == '__main__':
         np.array([[1, 0, 0, 0, 0]], dtype=int),
         np.array([0]),
         "five-neurons-1-spike")
-
-    save_spikes_for_doryta(
-        np.zeros((0, 5), dtype=int),
-        np.zeros((0,)),
-        "no-spikes")

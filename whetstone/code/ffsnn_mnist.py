@@ -13,12 +13,13 @@ on any of them:
 
 from __future__ import annotations
 
-from typing import Any, Tuple, BinaryIO, Union
+from typing import Any, Tuple, Union
 import pathlib
 import os
 # import sys
 import numpy as np
 import struct
+from .utils_doryta.model_saver import ModelSaverLayers
 
 # import keras
 from tensorflow.keras.models import Sequential
@@ -94,90 +95,6 @@ def create_callbacks() -> Any:
     logger = WhetstoneLogger(logdir=log_dir, sharpener=simple)  # type: ignore
 
     return [simple, logger]
-
-
-def save_model_for_doryta(model: Any, path: str) -> None:
-    with open(path, 'wb') as fh:
-        size_groups = [28*28, 256, 64, 100]
-
-        # -- Magic number
-        fh.write(struct.pack('>I', 0x23432BC4))
-        # -- File format
-        fh.write(struct.pack('>H', 0x1))
-        # -- Total number of neurons (N)
-        fh.write(struct.pack('>i', sum(size_groups)))
-        # -- Total number of groups
-        fh.write(struct.pack('B', len(size_groups)))
-        # -- Total number of connections
-        fh.write(struct.pack('B', len(size_groups) - 1))
-        # -- dt
-        fh.write(struct.pack('>f', 1/256))
-        # -- Neuron groups (layers)
-        for size in size_groups:
-            fh.write(struct.pack('>i', size))
-        # -- Synapses groups
-        acc = 0
-        for i in range(len(size_groups) - 1):
-            # Defining i-th fully connection
-            fh.write(struct.pack('>i', acc))    # from_start
-            fh.write(struct.pack('>i', acc + size_groups[i] - 1))  # from_end
-            fh.write(struct.pack('>i', acc + size_groups[i]))  # to_start
-            fh.write(struct.pack('>i', acc + size_groups[i] + size_groups[i+1] - 1))  # to_end
-            acc += size_groups[i]
-
-        # -- Actual neuron parameters (model itself)
-        #  N x neurons:
-        #  - Neuron params:
-        #    + float potential = 0;          // V
-        #    + float current = 0;            // I(t)
-        #    + float resting_potential = 0;  // V_e
-        #    + float reset_potential = 0;    // V_r
-        #    + float threshold = 0.5 - bias; // V_th
-        #    + float tau_m = dt = 1/256;     // C * R
-        #    + float resistance = 1;         // R
-        #  - Synapses for neuron:
-        #    + Number of synapses (M)
-        #    + Range of synapses [This is basically: to_start and to_end]
-        #    + M x synapses
-
-        # The parameters for all neurons are almost the same
-        def neuron_params(f: BinaryIO, bias: float) -> None:
-            f.write(struct.pack('>f', 0))    # potential
-            f.write(struct.pack('>f', 0))    # current
-            f.write(struct.pack('>f', 0))    # resting_potential
-            f.write(struct.pack('>f', 0))    # reset_potential
-            f.write(struct.pack('>f', 0.5 - bias))  # threshold
-            f.write(struct.pack('>f', 1/256))  # tau_m
-            f.write(struct.pack('>f', 1))    # resistance
-
-        w0, b0 = model.layers[0].get_weights()
-        w1, b1 = model.layers[2].get_weights()
-        w2, b2 = model.layers[4].get_weights()
-        # Neurons for first layer
-        for i in range(28 * 28):
-            neuron_params(fh, 0)
-            fh.write(struct.pack('>i', 256))   # number of synapses per neuron
-            w0[i].astype('>f4').tofile(fh)
-        assert(256 == w0.shape[1])
-
-        # Neurons for second layer
-        for i in range(256):
-            neuron_params(fh, b0[i])
-            fh.write(struct.pack('>i', 64))   # number of synapses
-            w1[i].astype('>f4').tofile(fh)
-        assert(64 == w1.shape[1])
-
-        # Third layer
-        for i in range(64):
-            neuron_params(fh, b1[i])
-            fh.write(struct.pack('>i', 100))  # number of synapses
-            w2[i].astype('>f4').tofile(fh)
-        assert(100 == w2.shape[1])
-
-        # Fourth layer
-        for i in range(100):
-            neuron_params(fh, b2[i])
-            fh.write(struct.pack('>i', 0))   # number of synapses
 
 
 # NOTE: shift cannot be arbitrarily small because time stamps are being stored as 32-bit
@@ -307,8 +224,8 @@ if __name__ == '__main__':  # noqa: C901
 
     loading_model = True
     train_model = False
-    checking_model = True
-    save_model = False
+    checking_model = False
+    save_model = True
 
     model_path = 'keras-simple-mnist'
 
@@ -341,7 +258,11 @@ if __name__ == '__main__':  # noqa: C901
 
         # Saving doryta model to memory
         if save_model:
-            save_model_for_doryta(model, "simple-mnist.doryta.bin")
+            msaver = ModelSaverLayers()
+            msaver.add_fully_layer(*model.layers[0].get_weights())
+            msaver.add_fully_layer(*model.layers[2].get_weights())
+            msaver.add_fully_layer(*model.layers[4].get_weights())
+            msaver.save("simple-mnist.doryta.bin")
 
     # Saving first 20 images in testing dataset
     if False:
