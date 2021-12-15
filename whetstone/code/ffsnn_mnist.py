@@ -225,7 +225,7 @@ if __name__ == '__main__':  # noqa: C901
     loading_model = True
     train_model = False
     checking_model = False
-    save_model = True
+    save_model = False
 
     model_path = 'keras-simple-mnist'
 

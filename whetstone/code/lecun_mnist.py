@@ -104,7 +104,7 @@ if __name__ == '__main__':
 
     loading_model = True
     train_model = False
-    checking_model = True
+    checking_model = False
 
     (x_train, y_train), (x_test, y_test) = load_data()
     # (x_train, y_train), (x_test, y_test) = mnist.load_data()
