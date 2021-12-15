@@ -380,9 +380,9 @@ class ModelSaverLayers(object):
         fh.write(struct.pack('>i', total_neurons))
         # -- Total number of groups
         total_groups_broken = sum([g.partitions for g in self.neuron_group])
-        fh.write(struct.pack('H', total_groups_broken))
+        fh.write(struct.pack('>H', total_groups_broken))
         # -- Total number of connections
-        fh.write(struct.pack('H', len(self.all_connections)))
+        fh.write(struct.pack('>H', len(self.all_connections)))
         # -- dt
         fh.write(struct.pack('>f', self.dt))
         # -- Neuron groups ("layers")
@@ -417,29 +417,34 @@ class ModelSaverLayers(object):
                 fh.write(struct.pack('>i', conn.kernel.shape[1]))
                 conn.kernel.astype('>f4').tofile(fh)
 
-        # -- Actual neuron parameters (model itself)
-        #  N x neurons:
+        # -- Actual neuron parameters
+        #   (Only synapses for Fully Connected layers are stored!)
+        #  N x neuron:
         for i, group in enumerate(self.neuron_group):
             assert(group.number == group.thresholds.shape[0])
 
             # Only fully connected layers parameters are saved in each neuron synapses
-            total_synapses_per_neuron = \
-                sum(conn.weights.shape[1] for conn in group.connections
+            total_fully_conn_per_neuron = \
+                sum(1 for conn in group.connections
                     if isinstance(conn, FullyConn))
 
             # Saving for each neuron neuron
             #  - Neuron params
-            #  - Number of synapses (M)
-            #  - M x synapses
+            #  - Number of fully connected connections to it
+            #  Per fully connection
+            #    - Range of neurons connected (to_start, to_end)
+            #    - Synapses for range
             for j in range(group.number):
                 # Neuron params
                 self._save_neuron_params(fh, group.thresholds[j])
-                # number of synapses per neuron
-                fh.write(struct.pack('>i', total_synapses_per_neuron))
+                # number of synapses for fully connected per neuron
+                fh.write(struct.pack('>H', total_fully_conn_per_neuron))
 
                 for conn in group.connections:
                     # synapses
                     if isinstance(conn, FullyConn):
+                        fh.write(struct.pack('>i', conn.to[0]))
+                        fh.write(struct.pack('>i', conn.to[1]))
                         conn.weights[j].astype('>f4').tofile(fh)
 
 

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from generic_code.spikes import save_spikes_for_doryta
+from utils_doryta.spikes import save_spikes_for_doryta
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,7 +20,7 @@ def insert_pattern(
         for j, val in enumerate(row):
             x = i_start + i
             y = j_start + j
-            img[0, x + y * width] = 1 if val else 0
+            img[0, y + x * width] = val
     return img
 
 

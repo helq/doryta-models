@@ -158,6 +158,7 @@ if __name__ == '__main__':
             w3, t3 = model.layers[7].get_weights()  # fully
             w4, t4 = model.layers[9].get_weights()  # fully
             w5, t5 = model.layers[11].get_weights()  # fully
+            w3 = w3.reshape((5, 5, 48, 120)).transpose((2, 0, 1, 3)).reshape((-1, 120))
             msaver.add_conv2d_layer(k1, .5 - t1, (28, 28), padding=(2, 2))
             msaver.add_maxpool_layer((28, 28, 32), (2, 2))
             msaver.add_conv2d_layer(k2, .5 - t2, (14, 14))
