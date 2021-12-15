@@ -225,7 +225,7 @@ if __name__ == '__main__':  # noqa: C901
     loading_model = True
     train_model = False
     checking_model = False
-    save_model = False
+    save_model = True
 
     model_path = 'keras-simple-mnist'
 
@@ -259,9 +259,12 @@ if __name__ == '__main__':  # noqa: C901
         # Saving doryta model to memory
         if save_model:
             msaver = ModelSaverLayers()
-            msaver.add_fully_layer(*model.layers[0].get_weights())
-            msaver.add_fully_layer(*model.layers[2].get_weights())
-            msaver.add_fully_layer(*model.layers[4].get_weights())
+            w1, b1 = model.layers[0].get_weights()
+            w2, b2 = model.layers[2].get_weights()
+            w3, b3 = model.layers[4].get_weights()
+            msaver.add_fully_layer(w1, .5 - b1)
+            msaver.add_fully_layer(w2, .5 - b2)
+            msaver.add_fully_layer(w3, .5 - b3)
             msaver.save("simple-mnist.doryta.bin")
 
     # Saving first 20 images in testing dataset

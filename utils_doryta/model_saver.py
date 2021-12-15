@@ -114,30 +114,32 @@ class Conv2DConn(NeuralConnection):
 class NeuronParams(NamedTuple):
     number: int
     partitions: int
-    biases: NDArray[Any]
+    thresholds: NDArray[Any]
     connections: List[NeuralConnection]
 
 
 class ModelSaverLayers(object):
-    def __init__(self, dt: float = 1/256) -> None:
+    def __init__(self, dt: float = 1/256, initial_threshold: float = .5) -> None:
         self.neuron_group: List[NeuronParams] = []
         self.all_connections: List[NeuralConnection] = []
         self.dt = dt
+        self.initial_threshold = initial_threshold
 
-    def add_fully_layer(self, weights: NDArray[Any], biases: NDArray[Any]) -> None:
+    def add_fully_layer(self, weights: NDArray[Any], thresholds: NDArray[Any]) -> None:
         if not (len(weights.shape) == 2
-                and len(biases.shape) == 1
-                and weights.shape[1] == biases.shape[0]):
+                and len(thresholds.shape) == 1
+                and weights.shape[1] == thresholds.shape[0]):
             raise Exception("The shape of weights must be (input, output)"
-                            " and for biases (output,). "
-                            f"Their shapes are {weights.shape} and {biases.shape}"
-                            " for weights and biases, respectively.")
+                            " and for thresholds (output,). "
+                            f"Their shapes are {weights.shape} and {thresholds.shape}"
+                            " for weights and thresholds, respectively.")
 
         fully_conn = FullyConn(weights)
 
         if len(self.neuron_group) == 0:
+            threshold0: NDArray[Any] = self.initial_threshold * np.ones((weights.shape[0],))
             self.neuron_group = [
-                NeuronParams(weights.shape[0], 1, np.zeros((weights.shape[0],)), [])
+                NeuronParams(weights.shape[0], 1, threshold0, [])
             ]
 
         if self.neuron_group[-1].number != weights.shape[0]:
@@ -148,7 +150,7 @@ class ModelSaverLayers(object):
 
         self.neuron_group[-1].connections.append(fully_conn)
         self.neuron_group.append(
-            NeuronParams(weights.shape[1], 1, biases, []))
+            NeuronParams(weights.shape[1], 1, thresholds, []))
 
         total_neurons = sum([g.number for g in self.neuron_group])
         to_start = total_neurons - self.neuron_group[-1].number
@@ -162,10 +164,10 @@ class ModelSaverLayers(object):
     def add_conv2d_layer(
         self,
         kernel: NDArray[Any],
-        bias: NDArray[Any],
+        threshold: NDArray[Any],
         input_size: Tuple[int, int],
-        padding: Tuple[int, int],
-        striding: Tuple[int, int]
+        padding: Tuple[int, int] = (0, 0),
+        striding: Tuple[int, int] = (1, 1)
     ) -> None:
         if len(kernel.shape) != 4:
             raise Exception("A kernel must be of four dimensions "
@@ -180,21 +182,23 @@ class ModelSaverLayers(object):
                             f"{self.neuron_group[-1].number} does not coincide with "
                             "the needed number for the given kernel "
                             "{input_neurons} (input_height * input_width * channnels)")
-        if len(bias.shape) != 1:
-            raise Exception("Bias is a 1 dimensional array. "
-                            f"{bias.shape} was given.")
-        if bias.size != filters:
-            raise Exception("The size of the bias must coincide with the number of "
-                            f"filters. {filters} filters and {bias.size} bias size "
-                            "were given")
+        if len(threshold.shape) != 1:
+            raise Exception("Threshold is a 1 dimensional array. "
+                            f"{threshold.shape} was given.")
+        if threshold.size != filters:
+            raise Exception("The size of the threshold must coincide with the number of "
+                            f"filters. {filters} filters and {threshold.size} threshold "
+                            "size were given")
 
+        # This convolution connection is only used to compute the output size
         conv = Conv2DConn(kernel[..., 0, 0], input_size, padding, striding)
         out_height, out_width = conv.output_size
         output_neurons = filters * out_height * out_width
 
         if len(self.neuron_group) == 0:
+            threshold0: NDArray[Any] = self.initial_threshold * np.ones((input_neurons))
             self.neuron_group = [
-                NeuronParams(input_neurons, channels, np.zeros((input_neurons,)), [])
+                NeuronParams(input_neurons, channels, threshold0, [])
             ]
 
         connections = self.neuron_group[-1].connections
@@ -215,10 +219,59 @@ class ModelSaverLayers(object):
 
         self.all_connections.extend(connections)
 
-        biases = np.repeat(bias, out_height * out_width)
-        assert output_neurons == biases.size
+        thresholds = np.repeat(threshold, out_height * out_width)
+        assert output_neurons == thresholds.size
         self.neuron_group.append(
-            NeuronParams(output_neurons, channels, biases, []))
+            NeuronParams(output_neurons, channels, thresholds, []))
+
+    def add_maxpool_layer(
+        self,
+        input_size: Tuple[int, int, int],
+        striding: Tuple[int, int]
+    ) -> None:
+        input_neurons = input_size[0] * input_size[1] * input_size[2]
+        if self.neuron_group and input_neurons != self.neuron_group[-1].number:
+            raise Exception("The number of input neurons (last layer) "
+                            f"{self.neuron_group[-1].number} does not coincide with "
+                            "the needed number for the given kernel "
+                            "{input_neurons} (input_height * input_width * channnels)")
+
+        channels = input_size[2]
+
+        kernel = np.ones(striding)
+        padding = (0, 0)
+        input_size_channel = (input_size[0], input_size[1])
+
+        conv = Conv2DConn(kernel, input_size_channel, padding, striding)
+        out_height, out_width = conv.output_size
+        output_neurons = channels * out_height * out_width
+
+        if len(self.neuron_group) == 0:
+            threshold0: NDArray[Any] = self.initial_threshold * np.ones((input_neurons))
+            self.neuron_group = [
+                NeuronParams(input_neurons, channels, threshold0, [])
+            ]
+
+        connections = self.neuron_group[-1].connections
+        neurons_to_date = sum([g.number for g in self.neuron_group]) \
+            - self.neuron_group[-1].number
+        n_input = input_size[0] * input_size[1]
+        n_output = out_height * out_width
+
+        for chan in range(channels):
+            conv = Conv2DConn(kernel, input_size_channel, padding, striding)
+            from_start = neurons_to_date + n_input * chan
+            from_end = from_start + n_input - 1
+            to_start = neurons_to_date + input_neurons + n_output * chan
+            to_end = to_start + n_output - 1
+            conv.add_from_to_ranges((from_start, from_end), (to_start, to_end))
+            connections.append(conv)
+
+        self.all_connections.extend(connections)
+
+        thresholds: NDArray[Any] = 0.5 * np.ones((output_neurons,))
+        self.neuron_group.append(
+            NeuronParams(output_neurons, channels, thresholds, []))
 
     #  - Neuron params:
     #    + float potential = 0;          // V
@@ -228,12 +281,12 @@ class ModelSaverLayers(object):
     #    + float threshold = 0.5 - bias; // V_th
     #    + float tau_m = dt = 1/256;     // C * R
     #    + float resistance = 1;         // R
-    def _save_neuron_params(self, f: BinaryIO, bias: float) -> None:
-        f.write(struct.pack('>f', 0))    # potential
-        f.write(struct.pack('>f', 0))    # current
-        f.write(struct.pack('>f', 0))    # resting_potential
-        f.write(struct.pack('>f', 0))    # reset_potential
-        f.write(struct.pack('>f', 0.5 - bias))  # threshold
+    def _save_neuron_params(self, f: BinaryIO, threshold: float) -> None:
+        f.write(struct.pack('>f', 0))     # potential
+        f.write(struct.pack('>f', 0))     # current
+        f.write(struct.pack('>f', 0))     # resting_potential
+        f.write(struct.pack('>f', 0))     # reset_potential
+        f.write(struct.pack('>f', threshold))  # threshold
         f.write(struct.pack('>f', self.dt))   # tau_m
         f.write(struct.pack('>f', 1))    # resistance
 
@@ -291,8 +344,8 @@ class ModelSaverLayers(object):
         #  N x neurons:
 
         for i, group in enumerate(self.neuron_group):
-            biases = group.biases
-            assert(group.number == biases.shape[0])
+            thresholds = group.thresholds
+            assert(group.number == thresholds.shape[0])
 
             last = i + 1 == len(self.neuron_group)
             # Saving for each neuron neuron
@@ -301,7 +354,7 @@ class ModelSaverLayers(object):
             #  - M x synapses
             for j in range(group.number):
                 # Neuron params
-                self._save_neuron_params(fh, biases[j])
+                self._save_neuron_params(fh, thresholds[j])
 
                 if last:
                     # number of synapses per neuron
@@ -367,11 +420,11 @@ class ModelSaverLayers(object):
         # -- Actual neuron parameters (model itself)
         #  N x neurons:
         for i, group in enumerate(self.neuron_group):
-            assert(group.number == group.biases.shape[0])
+            assert(group.number == group.thresholds.shape[0])
 
             # Only fully connected layers parameters are saved in each neuron synapses
             total_synapses_per_neuron = \
-                sum(conn.weights for conn in group.connections
+                sum(conn.weights.shape[1] for conn in group.connections
                     if isinstance(conn, FullyConn))
 
             # Saving for each neuron neuron
@@ -380,7 +433,7 @@ class ModelSaverLayers(object):
             #  - M x synapses
             for j in range(group.number):
                 # Neuron params
-                self._save_neuron_params(fh, group.biases[j])
+                self._save_neuron_params(fh, group.thresholds[j])
                 # number of synapses per neuron
                 fh.write(struct.pack('>i', total_synapses_per_neuron))
 
@@ -394,15 +447,15 @@ if __name__ == '__main__':
     w = np.array([[1,  0],
                   [2, -1],
                   [1,  1]])
-    b = -np.array([.5, 1])
+    b = np.array([.5, 1])
 
     w1 = np.array([[-1, 1, 0, -2, 1],
                    [4, -5, 0, 3, 0]])
-    b1 = -np.array([0, 0, 1, 0, 4])
+    b1 = np.array([0, 0, 1, 0, 4])
 
     msaver = ModelSaverLayers()
-    msaver.add_fully_layer(w, b)
-    msaver.add_fully_layer(w1, b1)
+    msaver.add_fully_layer(w, b + 0.5)
+    msaver.add_fully_layer(w1, b1 + 0.5)
     msaver.save("3-to-2-to-5-neurons.doryta.bin")
 
     k1 = np.zeros((3, 3, 1, 2))
@@ -412,14 +465,14 @@ if __name__ == '__main__':
     k1[..., 0, 1] = [[1, 1, 1],
                      [1, 0, 1],
                      [1, 1, 1]]
-    b1 = -np.array([2, 3])
+    t1 = np.array([2.5, 3.5])
 
     k2 = np.zeros((1, 1, 2, 1))
     k2[..., 0, 0] = [[1]]
     k2[..., 1, 0] = [[-1]]
-    b2 = np.array([0])
+    t2 = np.array([.5])
 
     msaver = ModelSaverLayers()
-    msaver.add_conv2d_layer(k1, b1, (20, 20), (1, 1), (1, 1))
-    msaver.add_conv2d_layer(k2, b2, (20, 20), (0, 0), (1, 1))
+    msaver.add_conv2d_layer(k1, t1, (20, 20), (1, 1), (1, 1))
+    msaver.add_conv2d_layer(k2, t2, (20, 20), (0, 0), (1, 1))
     msaver.save("another-gol.doryta.bin")

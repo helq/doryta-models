@@ -22,6 +22,7 @@ from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
 from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
 
 from .common_mnist import my_key
+from .utils_doryta.model_saver import ModelSaverLayers
 
 
 def load_data(
@@ -105,6 +106,7 @@ if __name__ == '__main__':
     loading_model = True
     train_model = False
     checking_model = False
+    save_model = False
 
     (x_train, y_train), (x_test, y_test) = load_data()
     # (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -148,3 +150,19 @@ if __name__ == '__main__':
             correct_predictions = (prediction == y_test.argmax(axis=1)).sum()
             print("Evaluating model (accuracy on black&white images):",
                   correct_predictions / imgs.shape[0])
+
+        if save_model:
+            msaver = ModelSaverLayers()
+            k1, t1 = model.layers[0].get_weights()  # conv2d
+            k2, t2 = model.layers[3].get_weights()  # conv2d
+            w3, t3 = model.layers[7].get_weights()  # fully
+            w4, t4 = model.layers[9].get_weights()  # fully
+            w5, t5 = model.layers[11].get_weights()  # fully
+            msaver.add_conv2d_layer(k1, .5 - t1, (28, 28), padding=(2, 2))
+            msaver.add_maxpool_layer((28, 28, 32), (2, 2))
+            msaver.add_conv2d_layer(k2, .5 - t2, (14, 14))
+            msaver.add_maxpool_layer((10, 10, 48), (2, 2))
+            msaver.add_fully_layer(w3, .5 - t3)
+            msaver.add_fully_layer(w4, .5 - t4)
+            msaver.add_fully_layer(w5, .5 - t5)
+            msaver.save("lenet-mnist.doryta.bin")
