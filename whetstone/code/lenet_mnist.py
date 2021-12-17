@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Tuple, Union
+from typing import Any, Tuple, Union, Optional
 import pathlib
 import os
 # import sys
@@ -46,7 +46,13 @@ def load_data(
 
 
 def create_model(initializer: Any = 'glorot_uniform',
-                 use_my_key: bool = True) -> Tuple[Any, Any]:
+                 use_my_key: bool = True,
+                 filters: Optional[Tuple[int, int]] = None) -> Tuple[Any, Any]:
+    if filters is None:
+        # These are the number of filters from the kaggle implementation. The original
+        # LeNet used (6, 16) instead
+        filters = (32, 48)
+
     if use_my_key:
         key = my_key()
     else:
@@ -56,11 +62,12 @@ def create_model(initializer: Any = 'glorot_uniform',
     # https://www.kaggle.com/curiousprogrammer/lenet-5-cnn-with-keras-99-48/notebook
     model = Sequential()
     # stride = 2
-    model.add(Conv2D(filters=32, kernel_size=(5, 5), padding='same', input_shape=(28, 28, 1)))
+    model.add(Conv2D(filters=filters[0], kernel_size=(5, 5),
+                     padding='same', input_shape=(28, 28, 1)))
     model.add(Spiking_BRelu())  # type: ignore
     model.add(MaxPool2D(strides=2))
     # stride = 0
-    model.add(Conv2D(filters=48, kernel_size=(5, 5), padding='valid'))
+    model.add(Conv2D(filters=filters[1], kernel_size=(5, 5), padding='valid'))
     model.add(Spiking_BRelu())  # type: ignore
     model.add(MaxPool2D(strides=2))
     model.add(Flatten())
@@ -97,7 +104,9 @@ def load_models(path: Union[str, pathlib.Path]) -> Tuple[Any, Any]:
 
 
 if __name__ == '__main__':
-    model_path = pathlib.Path('keras-lecun-mnist')
+    filters = (32, 48)
+    # filters = (6, 16)
+    model_path = pathlib.Path(f'keras-lecun-mnist-filters={filters[0]},{filters[1]}')
 
     # This is super good but produces negative values for the matrix, ie, negative currents :S
     initializer = 'glorot_uniform'
@@ -105,7 +114,7 @@ if __name__ == '__main__':
 
     loading_model = True
     train_model = False
-    checking_model = False
+    checking_model = True
     save_model = False
 
     (x_train, y_train), (x_test, y_test) = load_data()
@@ -158,12 +167,12 @@ if __name__ == '__main__':
             w3, t3 = model.layers[7].get_weights()  # fully
             w4, t4 = model.layers[9].get_weights()  # fully
             w5, t5 = model.layers[11].get_weights()  # fully
-            w3 = w3.reshape((5, 5, 48, 120)).transpose((2, 0, 1, 3)).reshape((-1, 120))
+            w3 = w3.reshape((5, 5, filters[1], 120)).transpose((2, 0, 1, 3)).reshape((-1, 120))
             msaver.add_conv2d_layer(k1, .5 - t1, (28, 28), padding=(2, 2))
-            msaver.add_maxpool_layer((28, 28, 32), (2, 2))
+            msaver.add_maxpool_layer((28, 28, filters[0]), (2, 2))
             msaver.add_conv2d_layer(k2, .5 - t2, (14, 14))
-            msaver.add_maxpool_layer((10, 10, 48), (2, 2))
+            msaver.add_maxpool_layer((10, 10, filters[1]), (2, 2))
             msaver.add_fully_layer(w3, .5 - t3)
             msaver.add_fully_layer(w4, .5 - t4)
             msaver.add_fully_layer(w5, .5 - t5)
-            msaver.save("lenet-mnist.doryta.bin")
+            msaver.save(f"lenet-mnist-filters={filters[0]},{filters[1]}.doryta.bin")

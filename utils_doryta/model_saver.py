@@ -222,7 +222,7 @@ class ModelSaverLayers(object):
         thresholds = np.repeat(threshold, out_height * out_width)
         assert output_neurons == thresholds.size
         self.neuron_group.append(
-            NeuronParams(output_neurons, channels, thresholds, []))
+            NeuronParams(output_neurons, filters, thresholds, []))
 
     def add_maxpool_layer(
         self,
