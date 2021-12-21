@@ -1,8 +1,11 @@
 from __future__ import annotations
 from utils_doryta.spikes import save_spikes_for_doryta
 
-import numpy as np
 from numpy.typing import NDArray
+import numpy as np
+import os
+import tarfile
+import shutil
 
 
 def insert_pattern(
@@ -47,3 +50,16 @@ if __name__ == '__main__':
          [1, 1, 0, 0, 0, 0, 0, 0],
          [0, 1, 0, 0, 0, 1, 1, 1]]
     )), times, "gol-die-hard")
+
+    # Saving random GoL 20x20 to tar.zst
+    os.makedirs("gol-random")
+    np.random.seed(3287592)
+    for i in range(1000):
+        save_spikes_for_doryta(
+            (np.random.rand(1, 400) < .2).astype(int),  # type: ignore
+            times, f"gol-random/gol-random-{i:04}")
+
+    with tarfile.open("gol-random.tar.xz", "w:xz") as tar:
+        tar.add('gol-random/')
+
+    shutil.rmtree('gol-random/')

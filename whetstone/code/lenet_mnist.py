@@ -104,8 +104,8 @@ def load_models(path: Union[str, pathlib.Path]) -> Tuple[Any, Any]:
 
 
 if __name__ == '__main__':
-    filters = (32, 48)
-    # filters = (6, 16)
+    # filters = (32, 48)
+    filters = (6, 16)
     model_path = pathlib.Path(f'keras-lecun-mnist-filters={filters[0]},{filters[1]}')
 
     # This is super good but produces negative values for the matrix, ie, negative currents :S
