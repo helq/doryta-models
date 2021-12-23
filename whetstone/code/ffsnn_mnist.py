@@ -27,32 +27,11 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.optimizers import Adadelta
 from tensorflow.keras import Model
-from tensorflow.keras.datasets import mnist
-from tensorflow.keras.utils import to_categorical
 
 from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
 from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
 
-from .common_mnist import my_key, plot_img
-
-
-def load_data(
-) -> Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:  # type: ignore
-    # Loading and preprocessing data
-    numClasses = 10
-    (x_train, y_train), (x_test, y_test) = mnist.load_data()
-
-    x_train = x_train.astype('float32')
-    x_train /= 255
-    x_test = x_test.astype('float32')
-    x_test /= 255
-
-    y_train = to_categorical(y_train, numClasses)
-    y_test = to_categorical(y_test, numClasses)
-
-    x_train = np.reshape(x_train, (60000, 28*28))
-    x_test = np.reshape(x_test, (10000, 28*28))
-    return (x_train, y_train), (x_test, y_test)
+from .common_mnist import my_key, plot_img, load_data
 
 
 def create_model(initializer: Any = 'glorot_uniform',
@@ -224,12 +203,14 @@ if __name__ == '__main__':  # noqa: C901
 
     loading_model = True
     train_model = False
-    checking_model = False
-    save_model = True
+    checking_model = True
+    save_model = False
 
-    model_path = 'keras-simple-mnist'
+    # dataset = 'mnist'
+    dataset = 'fashion-mnist'
+    model_path = f'keras-ffsnn-{dataset}'
 
-    (x_train, y_train), (x_test, y_test) = load_data()
+    (x_train, y_train), (x_test, y_test) = load_data(dataset)
 
     if loading_model:
         model, model_intermediate = load_models(model_path)
@@ -265,7 +246,7 @@ if __name__ == '__main__':  # noqa: C901
             msaver.add_fully_layer(w1, .5 - b1)
             msaver.add_fully_layer(w2, .5 - b2)
             msaver.add_fully_layer(w3, .5 - b3)
-            msaver.save("simple-mnist.doryta.bin")
+            msaver.save(f"ffsnn-{dataset}.doryta.bin")
 
     # Saving first 20 images in testing dataset
     if False:

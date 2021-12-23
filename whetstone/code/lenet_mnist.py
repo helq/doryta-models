@@ -4,7 +4,7 @@ from typing import Any, Tuple, Union, Optional
 import pathlib
 import os
 # import sys
-import numpy as np
+# import numpy as np
 # import struct
 
 # import matplotlib.pyplot as plt
@@ -15,34 +15,12 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D
 from tensorflow.keras.optimizers import Adadelta
 from tensorflow.keras import Model
-from tensorflow.keras.datasets import mnist
-from tensorflow.keras.utils import to_categorical
 
 from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
 from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
 
-from .common_mnist import my_key
+from .common_mnist import my_key, load_data
 from .utils_doryta.model_saver import ModelSaverLayers
-
-
-def load_data(
-) -> Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:  # type: ignore
-    # Loading and preprocessing data
-    numClasses = 10
-    (x_train, y_train), (x_test, y_test) = mnist.load_data()
-
-    x_train = x_train.astype('float32')
-    x_train /= 255
-    x_test = x_test.astype('float32')
-    x_test /= 255
-
-    y_train = to_categorical(y_train, numClasses)
-    y_test = to_categorical(y_test, numClasses)
-
-    x_train = np.reshape(x_train, (-1, 28, 28, 1))
-    x_test = np.reshape(x_test, (-1, 28, 28, 1))
-
-    return (x_train, y_train), (x_test, y_test)
 
 
 def create_model(initializer: Any = 'glorot_uniform',
@@ -106,30 +84,32 @@ def load_models(path: Union[str, pathlib.Path]) -> Tuple[Any, Any]:
 if __name__ == '__main__':
     # filters = (32, 48)
     filters = (6, 16)
-    model_path = pathlib.Path(f'keras-lecun-mnist-filters={filters[0]},{filters[1]}')
+    dataset = 'fashion-mnist'
+    model_path = pathlib.Path(f'keras-lenet-{dataset}-filters={filters[0]},{filters[1]}')
 
     # This is super good but produces negative values for the matrix, ie, negative currents :S
     initializer = 'glorot_uniform'
     # initializer = RandomUniform(minval=0.0, maxval=1.0)
 
-    loading_model = True
-    train_model = False
+    loading_model = False
+    train_model = True
     checking_model = True
-    save_model = False
+    save_model = True
 
-    (x_train, y_train), (x_test, y_test) = load_data()
-    # (x_train, y_train), (x_test, y_test) = mnist.load_data()
+    (x_train, y_train), (x_test, y_test) = load_data(dataset)
+    x_train = x_train.reshape((-1, 28, 28, 1))
+    x_test = x_test.reshape((-1, 28, 28, 1))
 
     if loading_model:
         model, model_intermediate = load_models(model_path)
 
     elif train_model:
         # Create a new directory to save the logs in.
-        log_dir = './simple_logs'
+        log_dir = str('./logs' / model_path)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        model, model_intermediate = create_model(initializer=initializer)
+        model, model_intermediate = create_model(initializer=initializer, filters=filters)
 
         # Parameters for shaperner
         start_epoch = 5
@@ -175,4 +155,4 @@ if __name__ == '__main__':
             msaver.add_fully_layer(w3, .5 - t3)
             msaver.add_fully_layer(w4, .5 - t4)
             msaver.add_fully_layer(w5, .5 - t5)
-            msaver.save(f"lenet-mnist-filters={filters[0]},{filters[1]}.doryta.bin")
+            msaver.save(f"lenet-{dataset}-filters={filters[0]},{filters[1]}.doryta.bin")
