@@ -201,9 +201,9 @@ if __name__ == '__main__':  # noqa: C901
     initializer = 'glorot_uniform'
     # initializer = RandomUniform(minval=0.0, maxval=1.0)
 
-    loading_model = True
+    loading_model = False
     train_model = False
-    checking_model = True
+    checking_model = False
     save_model = False
 
     # dataset = 'mnist'
@@ -254,9 +254,9 @@ if __name__ == '__main__':  # noqa: C901
         save_spikes_slice(x_test, y_test, slice(1950, 2000))
 
     # Saving all images as spikes
-    if False:
+    if True:
         range_ = ...
-        path = "spikified-mnist/spikified-images-all-shifted"
+        path = f"spikified-{dataset}/spikified-images-all-shifted"
 
         imgs = (x_test[range_] > .5).astype(int)
         print("Total images:", y_test[range_].shape[0])
