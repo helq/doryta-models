@@ -254,7 +254,7 @@ if __name__ == '__main__':  # noqa: C901
         save_spikes_slice(x_test, y_test, slice(1950, 2000))
 
     # Saving all images as spikes
-    if True:
+    if False:
         range_ = ...
         path = f"spikified-{dataset}/spikified-images-all-shifted"
 
