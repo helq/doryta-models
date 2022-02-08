@@ -278,7 +278,7 @@ class ModelSaverLayers(object):
     #    + float current = 0;            // I(t)
     #    + float resting_potential = 0;  // V_e
     #    + float reset_potential = 0;    // V_r
-    #    + float threshold = 0.5 - bias; // V_th
+    #    + float threshold = 0.5 + bias; // V_th
     #    + float tau_m = dt = 1/256;     // C * R
     #    + float resistance = 1;         // R
     def _save_neuron_params(self, f: BinaryIO, threshold: float) -> None:

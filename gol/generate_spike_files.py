@@ -65,8 +65,19 @@ if False and __name__ == '__main__':
     shutil.rmtree('20x20/gol-random/')
 
 
-# 1000 x 1000 grid
+# 100 x 100 grid
 if __name__ == '__main__':
+    times = np.array([0.6])
+
+    seed = 3287590
+    np.random.seed(seed)
+    save_spikes_for_doryta(
+        (np.random.rand(1, 100*100) < .2).astype(int),  # type: ignore
+        times, f"100x100/gol-random-{seed}")
+
+
+# 1000 x 1000 grid
+if False and __name__ == '__main__':
     times = np.array([0.6])
 
     save_spikes_for_doryta(
@@ -88,5 +99,5 @@ if __name__ == '__main__':
     seed = 3287591
     np.random.seed(seed)
     save_spikes_for_doryta(
-        (np.random.rand(1, 1000*1000) < .2).astype(int),  # type: ignore
+        (np.random.rand(1, 1000*1000) < .2).astype(int),
         times, f"1000x1000/gol-random-{seed}")

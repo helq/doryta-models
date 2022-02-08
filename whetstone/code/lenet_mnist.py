@@ -82,19 +82,20 @@ def load_models(path: Union[str, pathlib.Path]) -> Tuple[Any, Any]:
 
 
 if __name__ == '__main__':
-    # filters = (32, 48)
-    filters = (6, 16)
-    dataset = 'fashion-mnist'
+    filters = (32, 48)
+    # filters = (6, 16)
+    dataset = 'mnist'
+    # dataset = 'fashion-mnist'
     model_path = pathlib.Path(f'keras-lenet-{dataset}-filters={filters[0]},{filters[1]}')
 
     # This is super good but produces negative values for the matrix, ie, negative currents :S
     initializer = 'glorot_uniform'
     # initializer = RandomUniform(minval=0.0, maxval=1.0)
 
-    loading_model = False
-    train_model = True
+    loading_model = True
+    train_model = False
     checking_model = True
-    save_model = True
+    save_model = False
 
     (x_train, y_train), (x_test, y_test) = load_data(dataset)
     x_train = x_train.reshape((-1, 28, 28, 1))
