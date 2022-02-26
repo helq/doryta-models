@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from pathlib import Path
 from abc import ABC, abstractmethod
 
-from typing import BinaryIO, List, Union, Any, Tuple, NamedTuple
+from typing import BinaryIO, List, Union, Any, Tuple, NamedTuple, Optional, Dict
 
 
 # ceildiv from stackoverflow: https://stackoverflow.com/a/17511341
@@ -115,7 +115,10 @@ class NeuronParams(NamedTuple):
     number: int
     partitions: int
     thresholds: NDArray[Any]
+    # The parameters below can be passed as a dictionary args
     connections: List[NeuralConnection]
+    tau: float = 1/256
+    resistance: float = 1.0
 
 
 class ModelSaverLayers(object):
@@ -125,7 +128,70 @@ class ModelSaverLayers(object):
         self.dt = dt
         self.initial_threshold = initial_threshold
 
-    def add_fully_layer(self, weights: NDArray[Any], thresholds: NDArray[Any]) -> None:
+    @property
+    def total_neurons(self) -> int:
+        return sum(g.number for g in self.neuron_group)
+
+    def add_neuron_group(
+        self,
+        thresholds: NDArray[Any],
+        partitions: int = 1,
+        args: Optional[Dict[str, Any]] = None
+    ) -> None:
+        if len(thresholds.shape) != 1:
+            raise Exception("The shape of thresholds must be (n,) where n is the number of "
+                            "neurons to add. The shape of the given thresholds was "
+                            f"{thresholds.shape}")
+
+        if args is None:
+            args = {}
+        else:
+            args = args.copy()
+        if 'connections' not in args:
+            args['connections'] = []
+
+        num_neurons = thresholds.shape[0]
+        self.neuron_group.append(
+            NeuronParams(num_neurons, partitions, thresholds, **args)
+        )
+
+    def add_fully_conn(
+        self,
+        from_: int,
+        to: int,
+        weights: NDArray[Any]
+    ) -> None:
+        num_neuron_groups = len(self.neuron_group)
+        assert len(weights.shape) == 2
+        if from_ < 0 or to < 0 \
+                or num_neuron_groups <= from_ \
+                or num_neuron_groups <= to:
+            raise Exception(f"`from_` and `to` must be inside the range [0, {num_neuron_groups}]. "
+                            f"But `from_ = {from_}` and `to = {to}`")
+
+        num_neurons_in_from = self.neuron_group[from_].number
+        num_neurons_in_to = self.neuron_group[to].number
+        if weights.shape != (num_neurons_in_from, num_neurons_in_to):
+            raise Exception(f"The shape of the weights {weights.shape} does not coincide with "
+                            f"the number of output neurons ({num_neurons_in_from}) "
+                            f"and the number of input neurons ({num_neurons_in_to})")
+
+        fully_conn = FullyConn(weights)
+        from_start = sum(self.neuron_group[i].number for i in range(from_))
+        from_end = from_start + num_neurons_in_from - 1
+        to_start = sum(self.neuron_group[i].number for i in range(to))
+        to_end = to_start + num_neurons_in_to - 1
+        fully_conn.add_from_to_ranges((from_start, from_end), (to_start, to_end))
+
+        self.neuron_group[from_].connections.append(fully_conn)
+        self.all_connections.append(fully_conn)
+
+    def add_fully_layer(
+        self,
+        weights: NDArray[Any],
+        thresholds: NDArray[Any],
+        neuron_args: Optional[Dict[str, Any]] = None
+    ) -> None:
         if not (len(weights.shape) == 2
                 and len(thresholds.shape) == 1
                 and weights.shape[1] == thresholds.shape[0]):
@@ -133,33 +199,20 @@ class ModelSaverLayers(object):
                             " and for thresholds (output,). "
                             f"Their shapes are {weights.shape} and {thresholds.shape}"
                             " for weights and thresholds, respectively.")
-
-        fully_conn = FullyConn(weights)
-
-        if len(self.neuron_group) == 0:
-            threshold0: NDArray[Any] = self.initial_threshold * np.ones((weights.shape[0],))
-            self.neuron_group = [
-                NeuronParams(weights.shape[0], 1, threshold0, [])
-            ]
-
-        if self.neuron_group[-1].number != weights.shape[0]:
+        if len(self.neuron_group) > 0 and self.neuron_group[-1].number != weights.shape[0]:
             raise Exception(
                 f"The shape of the input weights {self.neuron_group[-1].number} doesn't "
                 "match with the previous layer output weights "
                 f"{weights.shape[0]}")
 
-        self.neuron_group[-1].connections.append(fully_conn)
-        self.neuron_group.append(
-            NeuronParams(weights.shape[1], 1, thresholds, []))
+        # The actual code starts from here
+        if len(self.neuron_group) == 0:
+            threshold0 = self.initial_threshold * np.ones((weights.shape[0],))
+            self.add_neuron_group(threshold0)
 
-        total_neurons = sum([g.number for g in self.neuron_group])
-        to_start = total_neurons - self.neuron_group[-1].number
-        to_end = total_neurons - 1
-        from_start = to_start - self.neuron_group[-2].number
-        from_end = to_start - 1
-        fully_conn.add_from_to_ranges((from_start, from_end), (to_start, to_end))
-
-        self.all_connections.append(fully_conn)
+        self.add_neuron_group(thresholds, args=neuron_args)
+        to = len(self.neuron_group) - 1  # last layer
+        self.add_fully_conn(from_=to - 1, to=to, weights=weights)
 
     def add_conv2d_layer(
         self,
@@ -167,7 +220,8 @@ class ModelSaverLayers(object):
         threshold: NDArray[Any],
         input_size: Tuple[int, int],
         padding: Tuple[int, int] = (0, 0),
-        striding: Tuple[int, int] = (1, 1)
+        striding: Tuple[int, int] = (1, 1),
+        neuron_args: Optional[Dict[str, Any]] = None
     ) -> None:
         if len(kernel.shape) != 4:
             raise Exception("A kernel must be of four dimensions "
@@ -197,13 +251,10 @@ class ModelSaverLayers(object):
 
         if len(self.neuron_group) == 0:
             threshold0: NDArray[Any] = self.initial_threshold * np.ones((input_neurons))
-            self.neuron_group = [
-                NeuronParams(input_neurons, channels, threshold0, [])
-            ]
+            self.add_neuron_group(threshold0, partitions=channels)
 
         connections = self.neuron_group[-1].connections
-        neurons_to_date = sum([g.number for g in self.neuron_group]) \
-            - self.neuron_group[-1].number
+        neurons_to_date = self.total_neurons - self.neuron_group[-1].number
         n_input = input_size[0] * input_size[1]
         n_output = out_height * out_width
 
@@ -221,8 +272,7 @@ class ModelSaverLayers(object):
 
         thresholds = np.repeat(threshold, out_height * out_width)
         assert output_neurons == thresholds.size
-        self.neuron_group.append(
-            NeuronParams(output_neurons, filters, thresholds, []))
+        self.add_neuron_group(thresholds, partitions=filters, args=neuron_args)
 
     def add_maxpool_layer(
         self,
@@ -281,25 +331,47 @@ class ModelSaverLayers(object):
     #    + float threshold = 0.5 + bias; // V_th
     #    + float tau_m = dt = 1/256;     // C * R
     #    + float resistance = 1;         // R
-    def _save_neuron_params(self, f: BinaryIO, threshold: float) -> None:
+    def _save_neuron_params(
+        self,
+        f: BinaryIO,
+        threshold: float,
+        params: Optional[NeuronParams] = None
+    ) -> None:
+        if params is None:
+            tau = self.dt
+            resistance = 1.0
+        else:
+            tau = params.tau
+            resistance = params.resistance
+
         f.write(struct.pack('>f', 0))     # potential
         f.write(struct.pack('>f', 0))     # current
         f.write(struct.pack('>f', 0))     # resting_potential
         f.write(struct.pack('>f', 0))     # reset_potential
-        f.write(struct.pack('>f', threshold))  # threshold
-        f.write(struct.pack('>f', self.dt))   # tau_m
-        f.write(struct.pack('>f', 1))    # resistance
+        f.write(struct.pack('>f', threshold))   # threshold
+        f.write(struct.pack('>f', tau))         # tau_m
+        f.write(struct.pack('>f', resistance))  # resistance
 
-    def save(self, path: Union[str, Path]) -> None:
+    def save(self, path: Union[str, Path], version: Optional[int] = None) -> None:
         if not self.neuron_group:
             raise Exception("Nothing to do. No layers defined")
 
-        if all(isinstance(conn, FullyConn) for conn in self.all_connections):
+        if version is None:
+            if all(isinstance(conn, FullyConn) for conn in self.all_connections):
+                version = 1
+            else:
+                version = 2
+
+        if version == 1:
+            if not all(isinstance(conn, FullyConn) for conn in self.all_connections):
+                raise Exception("Version 1 can only save FullyConn on layers")
             with open(path, 'wb') as fh:
                 self.save_v1(fh)
-        else:
+        elif version == 2:
             with open(path, 'wb') as fh:
                 self.save_v2(fh)
+        else:
+            raise Exception("There is no such thing as 'version = {version}'")
 
     def save_v1(self, fh: BinaryIO) -> None:
         # -- Magic number
@@ -307,8 +379,7 @@ class ModelSaverLayers(object):
         # -- File format
         fh.write(struct.pack('>H', 0x1))
         # -- Total number of neurons (N)
-        total_neurons = sum([g.number for g in self.neuron_group])
-        fh.write(struct.pack('>i', total_neurons))
+        fh.write(struct.pack('>i', self.total_neurons))
         # -- Total number of groups
         total_groups_broken = sum([g.partitions for g in self.neuron_group])
         fh.write(struct.pack('B', total_groups_broken))
@@ -354,7 +425,7 @@ class ModelSaverLayers(object):
             #  - M x synapses
             for j in range(group.number):
                 # Neuron params
-                self._save_neuron_params(fh, thresholds[j])
+                self._save_neuron_params(fh, thresholds[j], group)
 
                 if last:
                     # number of synapses per neuron
@@ -376,8 +447,7 @@ class ModelSaverLayers(object):
         # -- File format
         fh.write(struct.pack('>H', 0x2))
         # -- Total number of neurons (N)
-        total_neurons = sum([g.number for g in self.neuron_group])
-        fh.write(struct.pack('>i', total_neurons))
+        fh.write(struct.pack('>i', self.total_neurons))
         # -- Total number of groups
         total_groups_broken = sum([g.partitions for g in self.neuron_group])
         fh.write(struct.pack('>H', total_groups_broken))
@@ -436,7 +506,7 @@ class ModelSaverLayers(object):
             #    - Synapses for range
             for j in range(group.number):
                 # Neuron params
-                self._save_neuron_params(fh, group.thresholds[j])
+                self._save_neuron_params(fh, group.thresholds[j], group)
                 # number of synapses for fully connected per neuron
                 fh.write(struct.pack('>H', total_fully_conn_per_neuron))
 
@@ -449,14 +519,14 @@ class ModelSaverLayers(object):
 
 
 if __name__ == '__main__':
-    w = np.array([[1,  0],
+    w = np.array([[1,  0],  # type: ignore
                   [2, -1],
                   [1,  1]])
-    b = np.array([.5, 1])
+    b = np.array([.5, 1])  # type: ignore
 
-    w1 = np.array([[-1, 1, 0, -2, 1],
+    w1 = np.array([[-1, 1, 0, -2, 1],  # type: ignore
                    [4, -5, 0, 3, 0]])
-    b1 = np.array([0, 0, 1, 0, 4])
+    b1 = np.array([0, 0, 1, 0, 4])  # type: ignore
 
     msaver = ModelSaverLayers()
     msaver.add_fully_layer(w, b + 0.5)
@@ -470,12 +540,12 @@ if __name__ == '__main__':
     k1[..., 0, 1] = [[1, 1, 1],
                      [1, 0, 1],
                      [1, 1, 1]]
-    t1 = np.array([2.5, 3.5])
+    t1 = np.array([2.5, 3.5])  # type: ignore
 
     k2 = np.zeros((1, 1, 2, 1))
     k2[..., 0, 0] = [[1]]
     k2[..., 1, 0] = [[-1]]
-    t2 = np.array([.5])
+    t2 = np.array([.5])  # type: ignore
 
     msaver = ModelSaverLayers()
     msaver.add_conv2d_layer(k1, t1, (20, 20), (1, 1), (1, 1))

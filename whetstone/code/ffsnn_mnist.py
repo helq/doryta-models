@@ -20,6 +20,8 @@ import os
 import numpy as np
 import struct
 from .utils_doryta.model_saver import ModelSaverLayers
+from .utils_doryta.spikes import save_spikes_for_doryta
+from .temp_encoding import img_to_tempencoding
 
 # import keras
 from tensorflow.keras.models import Sequential
@@ -78,16 +80,15 @@ def create_callbacks() -> Any:
 
 # NOTE: shift cannot be arbitrarily small because time stamps are being stored as 32-bit
 # floating point numbers! A small number like 0.00001 will dissapear when added up to
-# 4000. I thought 32-bits were enough for those kind of computations, they are not. This
-# might be the root of many subtle bugs, dammit
-def save_spikes_for_doryta(
+# 4000. I thought 32-bits had enough precision for that kind of computation, they are not
+def save_spikes_for_doryta_legacy(
     img: np.ndarray[Any, Any],
     path: str,
     format: int = 2,
     shift: float = 0.0
 ) -> None:
     assert(len(img.shape) == 2)
-    assert(img.shape[1] == 28*28)
+    # assert(img.shape[1] == 28*28)
     with open(f"{path}.bin", 'wb') as fh:
         # Magic number
         fh.write(struct.pack('>I', 0x23432BC5))
@@ -122,7 +123,7 @@ def save_spikes_for_doryta(
                 # - Number of spikes for neuron
                 fh.write(struct.pack('>i', n_spikes_per_neuron[neuron_i]))
                 # - Neuron times
-                (np.flatnonzero(img[:, neuron_i]) + shift).astype('>f4').tofile(fh)  # type: ignore
+                (np.flatnonzero(img[:, neuron_i]) + shift).astype('>f4').tofile(fh)
         else:
             raise Exception("No other way to store spikes has been defined yet")
 
@@ -191,7 +192,7 @@ def save_spikes_slice(x_test: Any, y_test: Any, sl: slice) -> None:
     else:
         name = f"spikified-mnist/spikified-images-{sl.stop}"
     img = (x_test[sl] > .5).astype(int)
-    save_spikes_for_doryta(img, name)
+    save_spikes_for_doryta_legacy(img, name)
     save_tags_for_doryta(y_test[sl], name)
     print("Classes of images:", y_test[sl].argmax(axis=1))
 
@@ -201,10 +202,12 @@ if __name__ == '__main__':  # noqa: C901
     initializer = 'glorot_uniform'
     # initializer = RandomUniform(minval=0.0, maxval=1.0)
 
-    loading_model = False
-    train_model = False
+    temporal_encoding = True
+
+    loading_model = True
+    training_model = False
     checking_model = False
-    save_model = False
+    saving_model = False
 
     # dataset = 'mnist'
     dataset = 'fashion-mnist'
@@ -215,7 +218,7 @@ if __name__ == '__main__':  # noqa: C901
     if loading_model:
         model, model_intermediate = load_models(model_path)
 
-    elif train_model:
+    elif training_model:
         model, model_intermediate = create_model(initializer=initializer)
         callbacks = create_callbacks()
 
@@ -225,7 +228,7 @@ if __name__ == '__main__':  # noqa: C901
                   epochs=21, callbacks=callbacks)
         model.save(model_path)
 
-    if loading_model or train_model:
+    if loading_model or training_model:
         if checking_model:
             model.summary()
             print("Evaluating model (loss, accuracy):", model.evaluate(x_test, y_test))
@@ -238,15 +241,47 @@ if __name__ == '__main__':  # noqa: C901
                   correct_predictions / imgs.shape[0])
 
         # Saving doryta model to memory
-        if save_model:
-            msaver = ModelSaverLayers()
-            w1, b1 = model.layers[0].get_weights()
-            w2, b2 = model.layers[2].get_weights()
-            w3, b3 = model.layers[4].get_weights()
-            msaver.add_fully_layer(w1, .5 - b1)
-            msaver.add_fully_layer(w2, .5 - b2)
-            msaver.add_fully_layer(w3, .5 - b3)
-            msaver.save(f"ffsnn-{dataset}.doryta.bin")
+        if saving_model:
+            if not temporal_encoding:
+                msaver = ModelSaverLayers()
+                w1, b1 = model.layers[0].get_weights()
+                w2, b2 = model.layers[2].get_weights()
+                w3, b3 = model.layers[4].get_weights()
+                msaver.add_fully_layer(w1, .5 - b1)
+                msaver.add_fully_layer(w2, .5 - b2)
+                msaver.add_fully_layer(w3, .5 - b3)
+                msaver.save(f"ffsnn-{dataset}.doryta.bin")
+            else:
+                msaver = ModelSaverLayers(dt=1/256)
+                w1, b1 = model.layers[0].get_weights()
+                w2, b2 = model.layers[2].get_weights()
+                w3, b3 = model.layers[4].get_weights()
+                R = 4
+                capacitance = 1/256  # = dt
+                neuron_args = {
+                    'resistance': R,
+                    'tau': capacitance * R
+                }
+                msaver.add_fully_layer(w1, .5 - b1 + 10, neuron_args=neuron_args)
+                msaver.add_fully_layer(w2, .5 - b2)
+                msaver.add_fully_layer(w3, .5 - b3)
+
+                # Adding a neuron that triggers the second layer
+                msaver.add_neuron_group(0.5 * np.ones((1,)))
+                weights = 10 * np.ones((1, w1.shape[1]))
+                msaver.add_fully_conn(from_=4, to=1, weights=weights)
+
+                msaver.save(f"ffsnn-{dataset}-tempencode-R={R}.doryta.bin", version=2)
+
+    # finding images that were correctly classified when using full grayscale images but
+    # were not anymore when converted to white&black
+    if False:
+        prediction = model.predict(x_test).argmax(axis=1)
+        prediction_bin = model.predict((x_test > .5).astype(float)).argmax(axis=1)
+        lost_in_spikying = np.flatnonzero(
+            np.bitwise_and(
+                prediction == y_test.argmax(axis=1),
+                prediction_bin != y_test.argmax(axis=1)))
 
     # Saving first 20 images in testing dataset
     if False:
@@ -261,7 +296,7 @@ if __name__ == '__main__':  # noqa: C901
         imgs = (x_test[range_] > .5).astype(int)
         print("Total images:", y_test[range_].shape[0])
 
-        save_spikes_for_doryta(imgs, path, shift=.01)
+        save_spikes_for_doryta_legacy(imgs, path, shift=.01)
         save_tags_for_doryta(y_test[range_], path)
 
         print(f"Spikified images stored to `{path}.bin` and "
@@ -272,10 +307,11 @@ if __name__ == '__main__':  # noqa: C901
         i = np.random.randint(0, x_test.shape[0]-1)
         img = (x_test[i:i+1] > .5).astype(int)
         klass = y_test[i].argmax()
-        save_spikes_for_doryta(img, f"spikified-mnist/spikified-images-class={klass}", format=1)
+        save_spikes_for_doryta_legacy(img, f"spikified-mnist/spikified-images-class={klass}",
+                                      format=1)
         print("Classes of images:", klass)
-        if loading_model or train_model:
-            show_prediction(model, img)
+        if loading_model or training_model:
+            show_prediction(model, model_intermediate, img)
 
     # Checking a single model
     if False:
@@ -283,3 +319,47 @@ if __name__ == '__main__':  # noqa: C901
         print("Classes of images:", y_test[i].argmax())
         if loading_model:
             show_prediction(model, model_intermediate, (x_test[i:i+1] > .5).astype(int))
+
+    # Saving one (or many) images (TEMPORAL ENCODING)
+    if False and temporal_encoding:
+        # interval = slice(0, 1)
+        # interval = slice(0, 3)
+        # interval = slice(0, 100)
+        interval = slice(0, 10000)
+        # i = np.random.randint(0, x_test.shape[0]-1)
+        # interval = slice(i, i+1)
+
+        # cuts = [.01, 0.31, 0.42, 0.56, 0.75]
+        # cuts = [.01, 0.2, 0.4, 0.6]
+        cuts = [.01, 0.2, 0.3, 0.4, 0.5]
+        # cuts = [.5]  # This should coincide with Keras output
+
+        spikes, times, additional_spikes = img_to_tempencoding(
+            x_test[interval], cuts,
+            position_trigger_neuron=28 * 28 + 256 + 64 + 100)
+
+        klass = y_test[interval].argmax(axis=1)
+
+        if interval.start == interval.stop + 1:
+            path = f"spikified-{dataset}/ffsnn-tempcode/" \
+                   f"spikified-images-class={klass[0]}-" \
+                   f"grayscale=[{','.join(str(c) for c in cuts)}]"
+        # THIS DOESN'T WORK CURRENTLY. Adding up 1/512 + 10000 with single precision
+        # floating point numbers becomes (approx.) 10000 + 1/500 :(
+        elif interval.start == 0 and interval.stop == 10000:
+            path = f"spikified-{dataset}/ffsnn-tempcode/" \
+                   f"spikified-images-all-" \
+                   f"grayscale=[{','.join(str(c) for c in cuts)}]"
+        else:
+            path = f"spikified-{dataset}/ffsnn-tempcode/" \
+                   f"spikified-images-" \
+                   f"interval-{interval.start}-to-{interval.stop - 1}-" \
+                   f"grayscale=[{','.join(str(c) for c in cuts)}]"
+
+        save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
+        save_tags_for_doryta(y_test[interval], path)
+
+        print("Classes of images:", klass)
+        if False and (loading_model or training_model):
+            for j in range(len(cuts)):
+                show_prediction(model, model_intermediate, spikes[j:j+1, :28*28])
