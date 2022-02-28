@@ -115,8 +115,8 @@ class NeuronParams(NamedTuple):
     number: int
     partitions: int
     thresholds: NDArray[Any]
-    # The parameters below can be passed as a dictionary args
     connections: List[NeuralConnection]
+    # The parameters below can be passed as a dictionary args
     tau: float = 1/256
     resistance: float = 1.0
 
@@ -209,6 +209,14 @@ class ModelSaverLayers(object):
         if len(self.neuron_group) == 0:
             threshold0 = self.initial_threshold * np.ones((weights.shape[0],))
             self.add_neuron_group(threshold0)
+
+        if np.any(thresholds <= 0):
+            print("Warning: given threshold is smaller than 0 which means that neuron "
+                  "always fires when it receives any spike. This value will be changed "
+                  "to account for behaviour.")
+            neg_indices = thresholds <= 0
+            weights[:, neg_indices] = 1
+            thresholds[neg_indices] = 0.5
 
         self.add_neuron_group(thresholds, args=neuron_args)
         to = len(self.neuron_group) - 1  # last layer

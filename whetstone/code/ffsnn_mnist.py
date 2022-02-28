@@ -29,26 +29,37 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.optimizers import Adadelta
 from tensorflow.keras import Model
+from tensorflow.keras.initializers import RandomUniform
+import tensorflow.keras.constraints as constraints
 
 from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
-from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
+from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger, AdaptiveSharpener
 
 from .common_mnist import my_key, plot_img, load_data
 
 
 def create_model(initializer: Any = 'glorot_uniform',
-                 use_my_key: bool = True) -> Tuple[Any, Any]:
+                 use_my_key: bool = True,
+                 weight_constraints: Any = None) -> Tuple[Any, Any]:
+    if isinstance(initializer, str):
+        val = initializer
+        initializer = lambda _: val  # noqa: E731
+
     if use_my_key:
         key = my_key()
     else:
         key = key_generator(num_classes=10, width=100)
 
     model = Sequential()
-    model.add(Dense(256, input_shape=(28*28,), kernel_initializer=initializer))
+    model.add(Dense(256, input_shape=(28*28,),
+                    kernel_initializer=initializer(28*28),
+                    kernel_constraint=weight_constraints))
     model.add(Spiking_BRelu())  # type: ignore
-    model.add(Dense(64, kernel_initializer=initializer))
+    model.add(Dense(64, kernel_initializer=initializer(256),
+                    kernel_constraint=weight_constraints))
     model.add(Spiking_BRelu())  # type: ignore
-    model.add(Dense(100, kernel_initializer=initializer))
+    model.add(Dense(100, kernel_initializer=initializer(64),
+                    kernel_constraint=weight_constraints))
     model.add(Spiking_BRelu())  # type: ignore
     model.add(Softmax_Decode(key))  # type: ignore
 
@@ -63,19 +74,6 @@ def create_model(initializer: Any = 'glorot_uniform',
         outputs=[model.layers[2*i + 1].output for i in range(3)])
 
     return model, model_intermediate
-
-
-def create_callbacks() -> Any:
-    simple = SimpleSharpener(start_epoch=5, steps=5, epochs=True, bottom_up=True)  # type: ignore
-
-    # Create a new directory to save the logs in.
-    log_dir = './simple_logs'
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
-    logger = WhetstoneLogger(logdir=log_dir, sharpener=simple)  # type: ignore
-
-    return [simple, logger]
 
 
 # NOTE: shift cannot be arbitrarily small because time stamps are being stored as 32-bit
@@ -199,19 +197,37 @@ def save_spikes_slice(x_test: Any, y_test: Any, sl: slice) -> None:
 
 if __name__ == '__main__':  # noqa: C901
     # This is super good but produces negative values for the matrix, ie, negative currents :S
-    initializer = 'glorot_uniform'
-    # initializer = RandomUniform(minval=0.0, maxval=1.0)
+    # initializer = 'glorot_uniform'
+    # weight_constraints = None
+    # # sharpener params
+    # start_epoch = 5
+    # sharp_steps = 5
+    # total_brelus = 3
+
+    # This is experimental. Forcing non-negative weights
+    initializer: Any = lambda x: RandomUniform(minval=0.0, maxval=1.0 / x)  # noqa: E731
+    weight_constraints = constraints.NonNeg()
+    # sharpener params
+    start_epoch = 10
+    sharp_steps = 5
+    total_brelus = 3
 
     temporal_encoding = True
 
-    loading_model = True
-    training_model = False
-    checking_model = False
+    loading_model = False
+    training_model = True
+    checking_model = True
     saving_model = False
 
-    # dataset = 'mnist'
-    dataset = 'fashion-mnist'
-    model_path = f'keras-ffsnn-{dataset}'
+    dataset = 'mnist'
+    # dataset = 'fashion-mnist'
+
+    if initializer == 'glorot_uniform':
+        model_path = f'keras-ffsnn-{dataset}'
+    elif isinstance(weight_constraints, constraints.NonNeg):
+        model_path = f'keras-ffsnn-{dataset}-nonnegative'
+    else:
+        model_path = f'keras-ffsnn-{dataset}-nonstandard-weights'
 
     (x_train, y_train), (x_test, y_test) = load_data(dataset)
 
@@ -219,13 +235,28 @@ if __name__ == '__main__':  # noqa: C901
         model, model_intermediate = load_models(model_path)
 
     elif training_model:
-        model, model_intermediate = create_model(initializer=initializer)
-        callbacks = create_callbacks()
+        model, model_intermediate = create_model(initializer=initializer,
+                                                 weight_constraints=weight_constraints)
+
+        # Create a new directory to save the logs in.
+        log_dir = f'./logs/{model_path}'
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        epochs = start_epoch + sharp_steps * total_brelus + 1
+
+        # simple = SimpleSharpener(start_epoch=start_epoch, steps=sharp_steps,  # type: ignore
+        #                          epochs=True, bottom_up=True)
+        # logger = WhetstoneLogger(logdir=log_dir, sharpener=simple)  # type: ignore
+
+        adapt = AdaptiveSharpener(min_init_epochs=start_epoch)  # type: ignore
+        logger = WhetstoneLogger(logdir=log_dir, sharpener=adapt)  # type: ignore
 
         model.compile(loss='categorical_crossentropy', optimizer=Adadelta(
             learning_rate=4.0, rho=0.95, epsilon=1e-8, decay=0.0), metrics=['accuracy'])
         model.fit(x_train, y_train, batch_size=128,
-                  epochs=21, callbacks=callbacks)
+                  # epochs=epochs, callbacks=[logger, simple])
+                  epochs=epochs, callbacks=[adapt, logger])
         model.save(model_path)
 
     if loading_model or training_model:
