@@ -79,16 +79,20 @@ def create_model(filters: Tuple[int, int],
 if __name__ == '__main__':  # noqa: C901
     # filters = (32, 48)
     filters = (6, 16)
-    # dataset = 'mnist'
-    dataset = 'fashion-mnist'
+    dataset = 'mnist'
+    # dataset = 'fashion-mnist'
+
+    # Number of levels to discretize neuron weights (0 inactivates the levels)
+    # Only used when saving network
+    levels: int = 60
 
     # Parameters for shaperner
     start_epoch = 5
 
-    loading_model = False
-    training_model = True
+    loading_model = True
+    training_model = False
     checking_model = True
-    saving_model = False
+    saving_model = True
 
     # keras.utils.set_random_seed(2900522)
 
@@ -184,11 +188,11 @@ if __name__ == '__main__':  # noqa: C901
 
         if saving_model:
             msaver = ModelSaverLayers(dt=1/256)
-            k1, t1 = model.layers[0].get_weights()  # conv2d
-            k2, t2 = model.layers[3].get_weights()  # conv2d
-            w3, t3 = model.layers[7].get_weights()  # fully
-            w4, t4 = model.layers[9].get_weights()  # fully
-            w5, t5 = model.layers[11].get_weights()  # fully
+            k1, b1 = model.layers[0].get_weights()  # conv2d
+            k2, b2 = model.layers[3].get_weights()  # conv2d
+            w3, b3 = model.layers[7].get_weights()  # fully
+            w4, b4 = model.layers[9].get_weights()  # fully
+            w5, b5 = model.layers[11].get_weights()  # fully
             w3 = w3.reshape((5, 5, filters[1], 120)).transpose((2, 0, 1, 3)).reshape((-1, 120))
 
             R = 4
@@ -198,24 +202,48 @@ if __name__ == '__main__':  # noqa: C901
                 'tau': capacitance * R
             }
 
-            msaver.add_conv2d_layer(
-                k1, .5 - t1 + 10,
-                (28, 28),
-                padding=(2, 2),
-                neuron_args=neuron_args)
+            t1 = .5 - b1
+            t2 = .5 - b2
+            t3 = .5 - b3
+            t4 = .5 - b4
+            t5 = .5 - b5
+
+            if levels > 0:
+                k1 = (k1 * (levels / t1).reshape((1, 1, 1, -1))).astype(int)
+                k2 = (k2 * (levels / t2).reshape((1, 1, 1, -1))).astype(int)
+                w3 = (w3 * (levels / t3).reshape((1, -1))).astype(int)
+                w4 = (w4 * (levels / t4).reshape((1, -1))).astype(int)
+                w5 = (w5 * (levels / t5).reshape((1, -1))).astype(int)
+                t1[t1 > 0] = levels
+                t2[t2 > 0] = levels
+                t3[t3 > 0] = levels
+                t4[t4 > 0] = levels
+                t5[t5 > 0] = levels
+
+                weight_shift = 10 * levels
+            else:
+                weight_shift = 10
+
+            t1 = t1 + weight_shift
+
+            msaver.add_conv2d_layer(k1, t1, (28, 28), padding=(2, 2),
+                                    neuron_args=neuron_args)
             msaver.add_maxpool_layer((28, 28, filters[0]), (2, 2))
-            msaver.add_conv2d_layer(k2, .5 - t2, (14, 14))
+            msaver.add_conv2d_layer(k2, t2, (14, 14))
             msaver.add_maxpool_layer((10, 10, filters[1]), (2, 2))
-            msaver.add_fully_layer(w3, .5 - t3)
-            msaver.add_fully_layer(w4, .5 - t4)
-            msaver.add_fully_layer(w5, .5 - t5)
+            msaver.add_fully_layer(w3, t3)
+            msaver.add_fully_layer(w4, t4)
+            msaver.add_fully_layer(w5, t5)
 
             # Adding a neuron that triggers the second layer
             msaver.add_neuron_group(0.5 * np.ones((1,)))
-            weights = 10 * np.ones((1, 28 * 28 * filters[0]))
+            weights = weight_shift * np.ones((1, 28 * 28 * filters[0]))
             msaver.add_fully_conn(from_=8, to=1, weights=weights)
 
             basename = f"lenet-{dataset}-tempencode-R={R}-" \
                 f"filters={filters[0]},{filters[1]}"
 
-            msaver.save(f"{basename}-nonnegative.doryta.bin")
+            if levels > 0:
+                msaver.save(f"{basename}-nonnegative-lvls={levels}.doryta.bin")
+            else:
+                msaver.save(f"{basename}-nonnegative.doryta.bin")

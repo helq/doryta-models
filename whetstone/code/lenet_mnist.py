@@ -214,7 +214,7 @@ if __name__ == '__main__':  # noqa: C901
         if filters[0] == 32:
             trigger_neuron = 38448
         else:
-            trigger_neuron = 0
+            trigger_neuron = 8968
 
         spikes, times, additional_spikes = img_to_tempencoding(
             x_test[interval].reshape((-1, 28 * 28)), cuts,
@@ -240,7 +240,7 @@ if __name__ == '__main__':  # noqa: C901
         if filters[0] == 32:
             trigger_neuron = 38448
         else:
-            trigger_neuron = 0
+            trigger_neuron = 8968
 
         spikes, times, additional_spikes = img_to_tempencoding(
             x_test.reshape((-1, 28 * 28)), cuts,
