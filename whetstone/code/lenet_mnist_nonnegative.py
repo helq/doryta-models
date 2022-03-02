@@ -79,12 +79,13 @@ def create_model(filters: Tuple[int, int],
 if __name__ == '__main__':  # noqa: C901
     # filters = (32, 48)
     filters = (6, 16)
-    dataset = 'mnist'
-    # dataset = 'fashion-mnist'
+    # dataset = 'mnist'
+    dataset = 'fashion-mnist'
 
     # Number of levels to discretize neuron weights (0 inactivates the levels)
     # Only used when saving network
-    levels: int = 60
+    # levels: int = 256
+    levels: int = 0
 
     # Parameters for shaperner
     start_epoch = 5

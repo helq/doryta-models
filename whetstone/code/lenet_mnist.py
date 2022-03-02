@@ -85,8 +85,8 @@ def load_models(path: Union[str, pathlib.Path]) -> Tuple[Any, Any]:
 
 
 if __name__ == '__main__':  # noqa: C901
-    filters = (32, 48)
-    # filters = (6, 16)
+    # filters = (32, 48)
+    filters = (6, 16)
     # dataset = 'mnist'
     dataset = 'fashion-mnist'
     model_path = pathlib.Path(f'keras-lenet-{dataset}-filters={filters[0]},{filters[1]}')
@@ -201,14 +201,14 @@ if __name__ == '__main__':  # noqa: C901
                             f"filters={filters[0]},{filters[1]}.doryta.bin")
 
     # Saving one (or many) images (TEMPORAL ENCODING)
-    if False and temporal_encoding:
+    if True and temporal_encoding:
         # interval = slice(0, 1)
         # interval = slice(0, 3)
         interval = slice(0, 100)
 
-        # cuts = [.01, 0.31, 0.42, 0.56, 0.75]
+        cuts = [.01, 0.31, 0.42, 0.56, 0.75]
         # cuts = [.01, 0.2, 0.4, 0.6]
-        cuts = [.01, 0.2, 0.3, 0.4, 0.5]
+        # cuts = [.01, 0.2, 0.3, 0.4, 0.5]
         # cuts = [.5]  # This should coincide with Keras output
 
         if filters[0] == 32:
@@ -233,7 +233,7 @@ if __name__ == '__main__':  # noqa: C901
         print("Classes of images:", klass)
 
     # Saving all images using (TEMPORAL ENCODING)
-    if True and temporal_encoding:
+    if False and temporal_encoding:
         cuts = [.01, 0.2, 0.3, 0.4, 0.5]
         # cuts = [.5]  # This should coincide with Keras output
 
