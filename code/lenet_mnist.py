@@ -16,14 +16,15 @@ from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D
 from tensorflow.keras.optimizers import Adadelta
 from tensorflow.keras import Model
 
-from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
-from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
+from whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
+from whetstone.callbacks import SimpleSharpener, WhetstoneLogger
 
-from .common_mnist import my_key, load_data
-from .utils_doryta.model_saver import ModelSaverLayers
-from .temp_encoding import img_to_tempencoding
-from .utils_doryta.spikes import save_spikes_for_doryta
-from .ffsnn_mnist import save_tags_for_doryta
+from utils.common_mnist import my_key, load_data
+from utils.doryta.model_saver import ModelSaverLayers
+from utils.temp_encoding import img_to_tempencoding
+from utils.doryta.spikes import save_spikes_for_doryta
+from ffsnn_mnist import save_tags_for_doryta
+from utils.common import keras_model_path, doryta_model_path
 
 
 def create_model(initializer: Any = 'glorot_uniform',
@@ -89,7 +90,7 @@ if __name__ == '__main__':  # noqa: C901
     filters = (6, 16)
     # dataset = 'mnist'
     dataset = 'fashion-mnist'
-    model_path = pathlib.Path(f'keras-lenet-{dataset}-filters={filters[0]},{filters[1]}')
+    model_path = pathlib.Path(f'lenet-{dataset}-filters={filters[0]},{filters[1]}')
 
     # This is super good but produces negative values for the matrix, ie, negative currents :S
     initializer = 'glorot_uniform'
@@ -97,9 +98,9 @@ if __name__ == '__main__':  # noqa: C901
 
     temporal_encoding = True
 
-    loading_model = False
+    loading_model = True
     training_model = False
-    checking_model = False
+    checking_model = True
     saving_model = False
 
     (x_train, y_train), (x_test, y_test) = load_data(dataset)
@@ -107,11 +108,11 @@ if __name__ == '__main__':  # noqa: C901
     x_test = x_test.reshape((-1, 28, 28, 1))
 
     if loading_model:
-        model, model_intermediate = load_models(model_path)
+        model, model_intermediate = load_models(keras_model_path / model_path)
 
     elif training_model:
         # Create a new directory to save the logs in.
-        log_dir = str('./logs' / model_path)
+        log_dir = str(keras_model_path / 'logs' / model_path)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
@@ -132,7 +133,7 @@ if __name__ == '__main__':  # noqa: C901
             learning_rate=4.0, rho=0.95, epsilon=1e-8, decay=0.0), metrics=['accuracy'])
         model.fit(x_train, y_train, batch_size=128,
                   epochs=epochs, callbacks=[simple, logger])
-        model.save(model_path)
+        model.save(keras_model_path / model_path)
 
     if loading_model or training_model:
         if checking_model:
@@ -162,7 +163,8 @@ if __name__ == '__main__':  # noqa: C901
                 msaver.add_fully_layer(w3, .5 - t3)
                 msaver.add_fully_layer(w4, .5 - t4)
                 msaver.add_fully_layer(w5, .5 - t5)
-                msaver.save(f"lenet-{dataset}-filters={filters[0]},{filters[1]}.doryta.bin")
+                msaver.save(doryta_model_path /
+                            f"lenet-{dataset}-filters={filters[0]},{filters[1]}.doryta.bin")
             else:
                 msaver = ModelSaverLayers(dt=1/256)
                 k1, t1 = model.layers[0].get_weights()  # conv2d
@@ -190,18 +192,20 @@ if __name__ == '__main__':  # noqa: C901
                 msaver.add_fully_layer(w3, .5 - t3)
                 msaver.add_fully_layer(w4, .5 - t4)
                 msaver.add_fully_layer(w5, .5 - t5)
-                msaver.save(f"lenet-{dataset}-filters={filters[0]},{filters[1]}.doryta.bin")
+                msaver.save(doryta_model_path /
+                            f"lenet-{dataset}-filters={filters[0]},{filters[1]}.doryta.bin")
 
                 # Adding a neuron that triggers the second layer
                 msaver.add_neuron_group(0.5 * np.ones((1,)))
                 weights = 10 * np.ones((1, 28 * 28 * filters[0]))
                 msaver.add_fully_conn(from_=8, to=1, weights=weights)
 
-                msaver.save(f"lenet-{dataset}-tempencode-R={R}-"
+                msaver.save(doryta_model_path /
+                            f"lenet-{dataset}-tempencode-R={R}-"
                             f"filters={filters[0]},{filters[1]}.doryta.bin")
 
     # Saving one (or many) images (TEMPORAL ENCODING)
-    if True and temporal_encoding:
+    if False and temporal_encoding:
         # interval = slice(0, 1)
         # interval = slice(0, 3)
         interval = slice(0, 100)

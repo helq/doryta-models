@@ -13,11 +13,12 @@ from tensorflow.keras.initializers import RandomUniform
 import tensorflow.keras.constraints as constraints
 import tensorflow.keras as keras
 
-from .whetstone.layers import Spiking_BRelu, Softmax_Decode
-from .whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
+from whetstone.layers import Spiking_BRelu, Softmax_Decode
+from whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
 
-from .common_mnist import my_key, load_data
-from .utils_doryta.model_saver import ModelSaverLayers
+from utils.common_mnist import my_key, load_data
+from utils.doryta.model_saver import ModelSaverLayers
+from utils.common import keras_model_path, doryta_model_path
 
 
 def create_model(filters: Tuple[int, int],
@@ -82,7 +83,8 @@ if __name__ == '__main__':  # noqa: C901
     # dataset = 'mnist'
     dataset = 'fashion-mnist'
 
-    # Number of levels to discretize neuron weights (0 inactivates the levels)
+    # Number of levels to discretize neuron weights (0 inactivates the levels, ie, saving
+    # full floating-point number representation)
     # Only used when saving network
     # levels: int = 256
     levels: int = 0
@@ -97,7 +99,7 @@ if __name__ == '__main__':  # noqa: C901
 
     # keras.utils.set_random_seed(2900522)
 
-    path_name = f'keras-lenet-{dataset}-filters={filters[0]},{filters[1]}'
+    path_name = f'lenet-{dataset}-filters={filters[0]},{filters[1]}'
     model_path = pathlib.Path(f'{path_name}-nonnegative')
 
     (x_train, y_train), (x_test, y_test) = load_data(dataset)
@@ -105,11 +107,11 @@ if __name__ == '__main__':  # noqa: C901
     x_test = x_test.reshape((-1, 28, 28, 1))
 
     if loading_model:
-        model = load_model(model_path)
+        model = load_model(keras_model_path / model_path)
 
     elif training_model:
         # Create a new directory to save the logs in.
-        log_dir = str('./logs' / model_path)
+        log_dir = str(keras_model_path / 'logs' / model_path)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
@@ -173,7 +175,7 @@ if __name__ == '__main__':  # noqa: C901
             learning_rate=4.0, rho=0.95, epsilon=1e-8, decay=0.0), metrics=['accuracy'])
         model.fit(x_train, y_train, batch_size=128,
                   epochs=100, callbacks=[adapt, logger])
-        model.save(model_path)
+        model.save(keras_model_path / model_path)
 
     if loading_model or training_model:
         if checking_model:
@@ -245,6 +247,8 @@ if __name__ == '__main__':  # noqa: C901
                 f"filters={filters[0]},{filters[1]}"
 
             if levels > 0:
-                msaver.save(f"{basename}-nonnegative-lvls={levels}.doryta.bin")
+                msaver.save(doryta_model_path /
+                            f"{basename}-nonnegative-lvls={levels}.doryta.bin")
             else:
-                msaver.save(f"{basename}-nonnegative.doryta.bin")
+                msaver.save(doryta_model_path /
+                            f"{basename}-nonnegative.doryta.bin")

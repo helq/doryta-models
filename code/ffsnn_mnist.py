@@ -19,9 +19,9 @@ import os
 # import sys
 import numpy as np
 import struct
-from .utils_doryta.model_saver import ModelSaverLayers
-from .utils_doryta.spikes import save_spikes_for_doryta
-from .temp_encoding import img_to_tempencoding
+from utils.doryta.model_saver import ModelSaverLayers
+from utils.doryta.spikes import save_spikes_for_doryta
+from utils.temp_encoding import img_to_tempencoding
 
 # import keras
 from tensorflow.keras.models import Sequential
@@ -32,10 +32,12 @@ from tensorflow.keras import Model
 from tensorflow.keras.initializers import RandomUniform
 import tensorflow.keras.constraints as constraints
 
-from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
-from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger, AdaptiveSharpener
+from whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
+# from whetstone.callbacks import SimpleSharpener, WhetstoneLogger, AdaptiveSharpener
+from whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
 
-from .common_mnist import my_key, plot_img, load_data
+from utils.common_mnist import my_key, plot_img, load_data
+from utils.common import keras_model_path, doryta_model_path
 
 
 def create_model(initializer: Any = 'glorot_uniform',
@@ -205,6 +207,8 @@ if __name__ == '__main__':  # noqa: C901
     # total_brelus = 3
 
     # This is experimental. Forcing non-negative weights
+    # It works, but the initialization has to be precise (and there is a considerable loss
+    # in accuracy!)
     initializer: Any = lambda x: RandomUniform(minval=0.0, maxval=1.0 / x)  # noqa: E731
     weight_constraints = constraints.NonNeg()
     # sharpener params
@@ -214,8 +218,8 @@ if __name__ == '__main__':  # noqa: C901
 
     temporal_encoding = True
 
-    loading_model = False
-    training_model = True
+    loading_model = True
+    training_model = False
     checking_model = True
     saving_model = False
 
@@ -223,23 +227,23 @@ if __name__ == '__main__':  # noqa: C901
     # dataset = 'fashion-mnist'
 
     if initializer == 'glorot_uniform':
-        model_path = f'keras-ffsnn-{dataset}'
+        model_path = f'ffsnn-{dataset}'
     elif isinstance(weight_constraints, constraints.NonNeg):
-        model_path = f'keras-ffsnn-{dataset}-nonnegative'
+        model_path = f'ffsnn-{dataset}-nonnegative'
     else:
-        model_path = f'keras-ffsnn-{dataset}-nonstandard-weights'
+        model_path = f'ffsnn-{dataset}-nonstandard-weights'
 
     (x_train, y_train), (x_test, y_test) = load_data(dataset)
 
     if loading_model:
-        model, model_intermediate = load_models(model_path)
+        model, model_intermediate = load_models(keras_model_path / model_path)
 
     elif training_model:
         model, model_intermediate = create_model(initializer=initializer,
                                                  weight_constraints=weight_constraints)
 
         # Create a new directory to save the logs in.
-        log_dir = f'./logs/{model_path}'
+        log_dir = keras_model_path / 'logs' / model_path
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
@@ -257,7 +261,7 @@ if __name__ == '__main__':  # noqa: C901
         model.fit(x_train, y_train, batch_size=128,
                   # epochs=epochs, callbacks=[logger, simple])
                   epochs=epochs, callbacks=[adapt, logger])
-        model.save(model_path)
+        model.save(keras_model_path / model_path)
 
     if loading_model or training_model:
         if checking_model:
@@ -281,7 +285,7 @@ if __name__ == '__main__':  # noqa: C901
                 msaver.add_fully_layer(w1, .5 - b1)
                 msaver.add_fully_layer(w2, .5 - b2)
                 msaver.add_fully_layer(w3, .5 - b3)
-                msaver.save(f"ffsnn-{dataset}.doryta.bin")
+                msaver.save(doryta_model_path / f"ffsnn-{dataset}.doryta.bin")
             else:
                 msaver = ModelSaverLayers(dt=1/256)
                 w1, b1 = model.layers[0].get_weights()
@@ -302,7 +306,8 @@ if __name__ == '__main__':  # noqa: C901
                 weights = 10 * np.ones((1, w1.shape[1]))
                 msaver.add_fully_conn(from_=4, to=1, weights=weights)
 
-                msaver.save(f"ffsnn-{dataset}-tempencode-R={R}.doryta.bin", version=2)
+                msaver.save(doryta_model_path /
+                            f"ffsnn-{dataset}-tempencode-R={R}.doryta.bin", version=2)
 
     # finding images that were correctly classified when using full grayscale images but
     # were not anymore when converted to white&black

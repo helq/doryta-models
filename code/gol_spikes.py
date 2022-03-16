@@ -16,7 +16,7 @@ def insert_pattern(
     assert len(pattern.shape) == 2
     assert pattern.shape[0] <= height
     assert pattern.shape[1] <= width
-    img = np.zeros((1, height * width), dtype=int)
+    img = np.zeros((1, height * width), dtype=int)  # type: ignore
     i_start = int(height / 2 - pattern.shape[0] / 2)
     j_start = int(width / 2 - pattern.shape[1] / 2)
     for i, row in enumerate(pattern):
@@ -66,13 +66,13 @@ if False and __name__ == '__main__':
 
 
 # 100 x 100 grid
-if __name__ == '__main__':
-    times = np.array([0.6])
+if True and __name__ == '__main__':
+    times = np.array([0.6])  # type: ignore
 
     seed = 3287590
     np.random.seed(seed)
     save_spikes_for_doryta(
-        (np.random.rand(1, 100*100) < .2).astype(int),  # type: ignore
+        (np.random.rand(1, 100*100) < .2).astype(int),
         times, f"100x100/gol-random-{seed}")
 
 
