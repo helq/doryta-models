@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "args": ["heartbeat"],
+  "params": {
+    "R": 1.0,
+    "C": "heartbeat",
+    "threshold": 1.0,
+    "weight": 1.1,
+    "delay": 1
+  },
+  "outputs": ["b"],
+  "inputs": [
+    {"a": {}}
+  ],
+  "neurons": {
+    "a": {
+      "synapses": { "b": {} }
+    },
+    "b": {
+      "synapses": { "c": {} }
+    },
+    "c": {
+      "synapses": { "a": {} }
+    }
+  }
+}

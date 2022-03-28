@@ -16,15 +16,14 @@ from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D
 from tensorflow.keras.optimizers import Adadelta
 from tensorflow.keras import Model
 
-from whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
-from whetstone.callbacks import SimpleSharpener, WhetstoneLogger
+from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
+from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
 
-from utils.common_mnist import my_key, load_data
-from utils.doryta.model_saver import ModelSaverLayers
-from utils.temp_encoding import img_to_tempencoding
-from utils.doryta.spikes import save_spikes_for_doryta
-from ffsnn_mnist import save_tags_for_doryta
-from utils.common import keras_model_path, doryta_model_path
+from .utils.common_mnist import my_key, load_data, keras_model_path, doryta_model_path
+from .utils.doryta.model_saver import ModelSaverLayers
+from .utils.temp_encoding import img_to_tempencoding
+from .utils.doryta.spikes import save_spikes_for_doryta
+from .ffsnn_mnist import save_tags_for_doryta
 
 
 def create_model(initializer: Any = 'glorot_uniform',
@@ -100,8 +99,8 @@ if __name__ == '__main__':  # noqa: C901
 
     loading_model = True
     training_model = False
-    checking_model = True
-    saving_model = False
+    checking_model = False
+    saving_model = True
 
     (x_train, y_train), (x_test, y_test) = load_data(dataset)
     x_train = x_train.reshape((-1, 28, 28, 1))
@@ -174,7 +173,7 @@ if __name__ == '__main__':  # noqa: C901
                 w5, t5 = model.layers[11].get_weights()  # fully
                 w3 = w3.reshape((5, 5, filters[1], 120)).transpose((2, 0, 1, 3)).reshape((-1, 120))
 
-                R = 4
+                R = 4.0
                 capacitance = 1/256  # = dt
                 neuron_args = {
                     'resistance': R,
@@ -192,13 +191,11 @@ if __name__ == '__main__':  # noqa: C901
                 msaver.add_fully_layer(w3, .5 - t3)
                 msaver.add_fully_layer(w4, .5 - t4)
                 msaver.add_fully_layer(w5, .5 - t5)
-                msaver.save(doryta_model_path /
-                            f"lenet-{dataset}-filters={filters[0]},{filters[1]}.doryta.bin")
 
                 # Adding a neuron that triggers the second layer
                 msaver.add_neuron_group(0.5 * np.ones((1,)))
                 weights = 10 * np.ones((1, 28 * 28 * filters[0]))
-                msaver.add_fully_conn(from_=8, to=1, weights=weights)
+                msaver.add_all2all_conn(from_=8, to=1, weights=weights)
 
                 msaver.save(doryta_model_path /
                             f"lenet-{dataset}-tempencode-R={R}-"

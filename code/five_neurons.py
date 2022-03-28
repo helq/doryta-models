@@ -1,4 +1,4 @@
-from utils_doryta.spikes import save_spikes_for_doryta
+from .utils.doryta.spikes import save_spikes_for_doryta
 
 import numpy as np
 

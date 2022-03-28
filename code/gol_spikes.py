@@ -1,11 +1,12 @@
 from __future__ import annotations
-from utils_doryta.spikes import save_spikes_for_doryta
 
 from numpy.typing import NDArray
 import numpy as np
 import os
 import tarfile
 import shutil
+
+from .utils.doryta.spikes import save_spikes_for_doryta
 
 
 def insert_pattern(

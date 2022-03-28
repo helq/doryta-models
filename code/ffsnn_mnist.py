@@ -19,9 +19,6 @@ import os
 # import sys
 import numpy as np
 import struct
-from utils.doryta.model_saver import ModelSaverLayers
-from utils.doryta.spikes import save_spikes_for_doryta
-from utils.temp_encoding import img_to_tempencoding
 
 # import keras
 from tensorflow.keras.models import Sequential
@@ -32,12 +29,14 @@ from tensorflow.keras import Model
 from tensorflow.keras.initializers import RandomUniform
 import tensorflow.keras.constraints as constraints
 
-from whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
-# from whetstone.callbacks import SimpleSharpener, WhetstoneLogger, AdaptiveSharpener
-from whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
+from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
+# from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger, AdaptiveSharpener
+from .whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
 
-from utils.common_mnist import my_key, plot_img, load_data
-from utils.common import keras_model_path, doryta_model_path
+from .utils.doryta.model_saver import ModelSaverLayers
+from .utils.doryta.spikes import save_spikes_for_doryta
+from .utils.temp_encoding import img_to_tempencoding
+from .utils.common_mnist import my_key, plot_img, load_data, keras_model_path, doryta_model_path
 
 
 def create_model(initializer: Any = 'glorot_uniform',
@@ -220,7 +219,7 @@ if __name__ == '__main__':  # noqa: C901
 
     loading_model = True
     training_model = False
-    checking_model = True
+    checking_model = False
     saving_model = False
 
     dataset = 'mnist'
@@ -304,7 +303,7 @@ if __name__ == '__main__':  # noqa: C901
                 # Adding a neuron that triggers the second layer
                 msaver.add_neuron_group(0.5 * np.ones((1,)))
                 weights = 10 * np.ones((1, w1.shape[1]))
-                msaver.add_fully_conn(from_=4, to=1, weights=weights)
+                msaver.add_all2all_conn(from_=4, to=1, weights=weights)
 
                 msaver.save(doryta_model_path /
                             f"ffsnn-{dataset}-tempencode-R={R}.doryta.bin", version=2)
@@ -357,11 +356,11 @@ if __name__ == '__main__':  # noqa: C901
             show_prediction(model, model_intermediate, (x_test[i:i+1] > .5).astype(int))
 
     # Saving one (or many) images (TEMPORAL ENCODING)
-    if False and temporal_encoding:
-        # interval = slice(0, 1)
+    if True and temporal_encoding:
+        interval = slice(0, 1)
         # interval = slice(0, 3)
         # interval = slice(0, 100)
-        interval = slice(0, 10000)
+        # interval = slice(0, 10000)
         # i = np.random.randint(0, x_test.shape[0]-1)
         # interval = slice(i, i+1)
 
@@ -376,26 +375,27 @@ if __name__ == '__main__':  # noqa: C901
 
         klass = y_test[interval].argmax(axis=1)
 
+        path = "../mnist/spikes/"
         if interval.start == interval.stop + 1:
-            path = f"spikified-{dataset}/ffsnn-tempcode/" \
+            path += f"spikified-{dataset}/ffsnn-tempcode/" \
                    f"spikified-images-class={klass[0]}-" \
                    f"grayscale=[{','.join(str(c) for c in cuts)}]"
         # THIS DOESN'T WORK CURRENTLY. Adding up 1/512 + 10000 with single precision
         # floating point numbers becomes (approx.) 10000 + 1/500 :(
         elif interval.start == 0 and interval.stop == 10000:
-            path = f"spikified-{dataset}/ffsnn-tempcode/" \
+            path += f"spikified-{dataset}/ffsnn-tempcode/" \
                    f"spikified-images-all-" \
                    f"grayscale=[{','.join(str(c) for c in cuts)}]"
         else:
-            path = f"spikified-{dataset}/ffsnn-tempcode/" \
+            path += f"spikified-{dataset}/ffsnn-tempcode/" \
                    f"spikified-images-" \
                    f"interval-{interval.start}-to-{interval.stop - 1}-" \
                    f"grayscale=[{','.join(str(c) for c in cuts)}]"
 
-        save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
-        save_tags_for_doryta(y_test[interval], path)
-
         print("Classes of images:", klass)
-        if False and (loading_model or training_model):
+        if True and (loading_model or training_model):
             for j in range(len(cuts)):
                 show_prediction(model, model_intermediate, spikes[j:j+1, :28*28])
+
+        save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
+        save_tags_for_doryta(y_test[interval], path)

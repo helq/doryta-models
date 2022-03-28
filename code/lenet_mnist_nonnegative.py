@@ -13,12 +13,11 @@ from tensorflow.keras.initializers import RandomUniform
 import tensorflow.keras.constraints as constraints
 import tensorflow.keras as keras
 
-from whetstone.layers import Spiking_BRelu, Softmax_Decode
-from whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
+from .whetstone.layers import Spiking_BRelu, Softmax_Decode
+from .whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
 
-from utils.common_mnist import my_key, load_data
-from utils.doryta.model_saver import ModelSaverLayers
-from utils.common import keras_model_path, doryta_model_path
+from .utils.common_mnist import my_key, load_data, keras_model_path, doryta_model_path
+from .utils.doryta.model_saver import ModelSaverLayers
 
 
 def create_model(filters: Tuple[int, int],
@@ -94,7 +93,7 @@ if __name__ == '__main__':  # noqa: C901
 
     loading_model = True
     training_model = False
-    checking_model = True
+    checking_model = False
     saving_model = True
 
     # keras.utils.set_random_seed(2900522)
@@ -241,7 +240,7 @@ if __name__ == '__main__':  # noqa: C901
             # Adding a neuron that triggers the second layer
             msaver.add_neuron_group(0.5 * np.ones((1,)))
             weights = weight_shift * np.ones((1, 28 * 28 * filters[0]))
-            msaver.add_fully_conn(from_=8, to=1, weights=weights)
+            msaver.add_all2all_conn(from_=8, to=1, weights=weights)
 
             basename = f"lenet-{dataset}-tempencode-R={R}-" \
                 f"filters={filters[0]},{filters[1]}"

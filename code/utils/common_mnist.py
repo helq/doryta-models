@@ -4,8 +4,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow.keras.datasets as datasets
 from tensorflow.keras.utils import to_categorical
+import pathlib
 
 from typing import Tuple
+
+
+keras_model_path = pathlib.Path('mnist/raw_keras_models/')
+doryta_model_path = pathlib.Path('mnist/snn-models/')
 
 
 def my_key() -> np.ndarray:  # type: ignore
