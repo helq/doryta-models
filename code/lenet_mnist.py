@@ -223,10 +223,11 @@ if __name__ == '__main__':  # noqa: C901
 
         klass = y_test[interval].argmax(axis=1)
 
-        path = f"spikified-{dataset}/lenet-filters={filters[0]},{filters[1]}-tempcode/" \
-               f"spikified-images-" \
-               f"interval-{interval.start}-to-{interval.stop - 1}-" \
-               f"grayscale=[{','.join(str(c) for c in cuts)}]"
+        path = doryta_model_path / "../spikes/" \
+            "spikified-{dataset}/lenet-filters={filters[0]},{filters[1]}-tempcode/" \
+            f"spikified-images-" \
+            f"interval-{interval.start}-to-{interval.stop - 1}-" \
+            f"grayscale=[{','.join(str(c) for c in cuts)}]"
 
         save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
         save_tags_for_doryta(y_test[interval], path)
@@ -249,9 +250,10 @@ if __name__ == '__main__':  # noqa: C901
 
         klass = y_test.argmax(axis=1)
 
-        path = f"spikified-{dataset}/lenet-filters={filters[0]},{filters[1]}-tempcode/" \
-               f"spikified-images-all-" \
-               f"grayscale=[{','.join(str(c) for c in cuts)}]"
+        path = doryta_model_path / "../spikes/" \
+            f"spikified-{dataset}/lenet-filters={filters[0]},{filters[1]}-tempcode/" \
+            f"spikified-images-all-" \
+            f"grayscale=[{','.join(str(c) for c in cuts)}]"
 
         save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
         save_tags_for_doryta(y_test, path)

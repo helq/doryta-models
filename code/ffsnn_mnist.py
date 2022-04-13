@@ -326,7 +326,7 @@ if __name__ == '__main__':  # noqa: C901
     # Saving all images as spikes
     if False:
         range_ = ...
-        path = f"spikified-{dataset}/spikified-images-all-shifted"
+        path = f"mnist/spikes/spikified-{dataset}/spikified-images-all-shifted"
 
         imgs = (x_test[range_] > .5).astype(int)
         print("Total images:", y_test[range_].shape[0])
@@ -342,8 +342,8 @@ if __name__ == '__main__':  # noqa: C901
         i = np.random.randint(0, x_test.shape[0]-1)
         img = (x_test[i:i+1] > .5).astype(int)
         klass = y_test[i].argmax()
-        save_spikes_for_doryta_legacy(img, f"spikified-mnist/spikified-images-class={klass}",
-                                      format=1)
+        save_spikes_for_doryta_legacy(
+            img, f"mnist/spikes/spikified-mnist/spikified-images-class={klass}", format=1)
         print("Classes of images:", klass)
         if loading_model or training_model:
             show_prediction(model, model_intermediate, img)
@@ -375,7 +375,7 @@ if __name__ == '__main__':  # noqa: C901
 
         klass = y_test[interval].argmax(axis=1)
 
-        path = "../mnist/spikes/"
+        path = "mnist/spikes/"
         if interval.start == interval.stop + 1:
             path += f"spikified-{dataset}/ffsnn-tempcode/" \
                    f"spikified-images-class={klass[0]}-" \

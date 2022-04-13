@@ -1,0 +1,34 @@
+{
+  "version": "0.0.1",
+  "args": ["heartbeat"],
+  "params": {
+    "R": 1.0,
+    "C": "heartbeat",
+    "threshold": 0.8,
+    "weight": 1.0,
+    "delay": 1
+  },
+  "outputs": ["start"],
+  "inputs": [
+    {"start": {}},
+    {"stop": {}}
+  ],
+  "neurons": {
+    "a": {
+      "synapses": { "stop": {"weight": 0.5} }
+    },
+    "stop": {
+      "params": { "R": 4 },
+      "synapses": { "start": {"weight": 0.5} }
+    },
+    "start": {
+      "synapses": {
+        "a": {},
+        "stop": {"weight": 0.5},
+        "hop1": {}
+      }
+    },
+    "hop1": {"synapses": {"hop2": {}}},
+    "hop2": {"synapses": {"start": {"weight": 0.5}}}
+  }
+}

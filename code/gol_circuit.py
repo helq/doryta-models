@@ -18,9 +18,8 @@ if __name__ == '__main__':
 
     heartbeat = 1 / 5
 
-    with open('gol/json/gol-nonnegative.json') as f:
-        s = f.read()
-        sngol = SNCircuit.load_json(s, {'heartbeat': heartbeat})
+    sngol = SNCircuit.load_json(
+        'gol/json/gol-nonnegative-v1.json', {'heartbeat': heartbeat})
 
     msaver = ModelSaverLayers(dt=heartbeat)
     msaver.add_conv2d_layer(k1, t1, (20, 20), (1, 1), (1, 1))

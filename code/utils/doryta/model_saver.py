@@ -25,6 +25,11 @@ class NeuralConnection(ABC):
     """
     A neurnal connection indicates how a group of neurons connects to another (which
     neurons are connected to which (synapes) and their weights).
+
+    `from_` is a tuple indicating the first and last neuron ids (integers) to start the
+    connection.
+    `to` is a tuple indicating the first and last neuron ids where the connections should
+    arrive.
     """
 
     from_: Tuple[int, int]
@@ -270,37 +275,97 @@ class ModelSaverLayers(object):
 
         self.neuron_group[from_].connections.append(all2all_conn)
 
+    def add_one2all_conn(
+        self,
+        from_layer: Optional[int],
+        from_neuron: int,
+        to: Tuple[int, int],
+        weight: float
+    ) -> None:
+        """
+        Connects a single neuron to a whole layer. If `from_layer` is None, `from_neuron`
+        indicates the global id of the input neuron. Otherwise, `from_layer` indicates the
+        layer in which the neuron falls into and `from_neuron` indicates the position
+        within the layer.
+
+        `to` indicates the layer and partition the connection should get to
+        """
+
+        num_neuron_groups = len(self.neuron_group)
+        if not (0 <= to[0] < num_neuron_groups):
+            raise Exception(f"`to[0]` must be inside the range [0, {num_neuron_groups-1}], "
+                            f"but `to[0] = {to[0]}`")
+        if from_layer is None:
+            total_neurons = sum(group_i.number for group_i in self.neuron_group)
+            if not (0 <= from_neuron < total_neurons):
+                raise Exception("`from_neuron` must be inside the range "
+                                f"[0, {total_neurons-1}], "
+                                f"but `from_neuron = {from_neuron}`")
+        else:
+            if not (0 <= from_layer < num_neuron_groups):
+                raise Exception("`from_layer` must be inside the range "
+                                f"[0, {num_neuron_groups-1}], "
+                                f"but `from_layer = {from_layer}`")
+            neurons_layer = self.neuron_group[from_layer].number
+            if not (0 <= from_neuron < neurons_layer):
+                raise Exception("`from_neuron` must be inside the range "
+                                f"[0, {neurons_layer-1}], "
+                                f"but `from_neuron = {from_neuron}`")
+
+        num_neurons_in_to = self.neuron_group[to[0]].partition_size
+        weights = np.ones((1, num_neurons_in_to)) * weight
+
+        if from_layer is None:
+            # finding layer in which neuron falls
+            tot = 0
+            for i, group_i in enumerate(self.neuron_group):
+                tot += group_i.number
+                if tot > from_neuron:
+                    break
+
+            from_layer = i
+            from_start = from_neuron
+            from_end = from_neuron
+        else:
+            from_start = sum(self.neuron_group[i].number for i in range(from_layer)) \
+                + from_neuron
+            from_end = from_start
+
+        all2all_conn = All2AllConn(weights)
+        to_start = sum(self.neuron_group[i].number for i in range(to[0])) \
+            + num_neurons_in_to * to[1]
+        to_end = to_start + num_neurons_in_to - 1
+        all2all_conn.set_from_and_to((from_start, from_end), (to_start, to_end))
+
+        self.neuron_group[from_layer].connections.append(all2all_conn)
+
     def add_one2one_conn(
         self,
         from_: Union[int, Tuple[int, int]],
         to: Union[int, Tuple[int, int]],
         weight: float
     ) -> None:
-        # finding neuron id ranges for input layer
+        """
+        When `from` (or `to`) is a tuple, the first value indicates the number of the
+        layer and the second indicates the partition number within the layer.
+        """
         if isinstance(from_, int):
-            input_neuron_group = self.neuron_group[from_]
-            num_neurons = input_neuron_group.number
-            from_start = sum(self.neuron_group[i].number for i in range(from_))
-            from_end = from_start + input_neuron_group.number - 1
-        else:  # isinstance(from_, Tuple[int, int])
-            assert from_[0] >= 0
-            input_neuron_group = self.neuron_group[from_[0]]
-            num_neurons = input_neuron_group.partition_size
-            from_start = sum(self.neuron_group[i].number for i in range(from_[0])) \
-                + num_neurons * from_[1]
-            from_end = from_start + num_neurons - 1
-
-        # finding neuron id ranges for neurons to connect
+            from_ = (from_, 0)
         if isinstance(to, int):
-            num_neurons_in_to = self.neuron_group[to].number
-            to_start = sum(self.neuron_group[i].number for i in range(to))
-            to_end = to_start + num_neurons - 1
-        else:  # isinstance(from_, Tuple[int, int])
-            assert to[0] >= 0
-            num_neurons_in_to = self.neuron_group[to[0]].partition_size
-            to_start = sum(self.neuron_group[i].number for i in range(to[0])) \
-                + num_neurons * to[1]
-            to_end = to_start + num_neurons - 1
+            to = (to, 0)
+        # finding neuron id ranges for input layer
+        assert from_[0] >= 0
+        input_neuron_group = self.neuron_group[from_[0]]
+        num_neurons = input_neuron_group.partition_size
+        from_start = sum(self.neuron_group[i].number for i in range(from_[0])) \
+            + num_neurons * from_[1]
+        from_end = from_start + num_neurons - 1
+
+        assert to[0] >= 0
+        num_neurons_in_to = self.neuron_group[to[0]].partition_size
+        to_start = sum(self.neuron_group[i].number for i in range(to[0])) \
+            + num_neurons * to[1]
+        to_end = to_start + num_neurons - 1
 
         if num_neurons != num_neurons_in_to:
             raise Exception(
@@ -443,6 +508,8 @@ class ModelSaverLayers(object):
         thresholds: NDArray[Any] = 0.5 * np.ones((output_neurons,))
         self.add_neuron_group(thresholds, channels)
 
+    # TODO: admit in list of input layers to determine a unique neuron to connect in which
+    # case the connection type should be 1-to-many!
     def add_sncircuit_layer(
         self,
         snc: SNCircuit,
@@ -455,10 +522,10 @@ class ModelSaverLayers(object):
                        indicate that neuron group 2 partition 3 will be used as input 0 to
                        the circuit, and group 4 partition 2 will be used as input 1
         """
-        assert len(self.neuron_group) > 0, "A sn-circuit cannot be the first layer (yet)"
+        assert len(self.neuron_group) > 0, "A sn-circuit cannot be the first layer"
 
         if input_layers is None:
-            input_layers = [len(self.neuron_group) - 1]
+            input_layers = [(len(self.neuron_group) - 1, 0)]
 
         # assert number of inputs to circuit must be the same as input layers
         if len(input_layers) != len(snc.inputs):
@@ -470,11 +537,11 @@ class ModelSaverLayers(object):
             self.neuron_group[inp].number if isinstance(inp, int)
             else self.neuron_group[inp[0]].partition_size
             for inp in input_layers]
-        num_circuits = size_input_layers[0]
+        num_circuits = max(size_input_layers)
 
-        if not all(inp == num_circuits for inp in size_input_layers):
-            raise Exception("All input layers must be the same size. Layer sizes are "
-                            f"{size_input_layers}")
+        if not all(inp == num_circuits or inp == 1 for inp in size_input_layers):
+            raise Exception("All input layers must be the same size or a single neuron. "
+                            f"Layer sizes are {size_input_layers}")
 
         # defining a new layer with number of partitions equal to the number of neurons in snc
         neuron_args = snc.get_params_in_bulk()
@@ -500,7 +567,17 @@ class ModelSaverLayers(object):
             for snc_neuron_id, synap_params in input_params.items():
                 assert synap_params.delay == 1, "The binary format only allows for delay = 1"
                 # create a connection
-                self.add_one2one_conn(input_layer, (last_layer, snc_neuron_id), synap_params.weight)
+                if self.__is_layer_one_neuron(input_layer):
+                    if isinstance(input_layer, tuple):
+                        input_layer_, neuron_pos = input_layer
+                    else:
+                        input_layer_ = input_layer
+                        neuron_pos = 0
+                    self.add_one2all_conn(
+                        input_layer_, neuron_pos, (last_layer, snc_neuron_id), synap_params.weight)
+                else:
+                    self.add_one2one_conn(
+                        input_layer, (last_layer, snc_neuron_id), synap_params.weight)
 
         # Defining connections for each synapse between the SN-circuit neurons
         for neuron_id, neuron_params in snc.neurons.items():
@@ -508,6 +585,13 @@ class ModelSaverLayers(object):
                 assert synap_params.delay == 1, "The binary format only allows for delay = 1"
                 self.add_one2one_conn(
                     (last_layer, neuron_id), (last_layer, to_neuron_id), synap_params.weight)
+
+    def __is_layer_one_neuron(self, group_id: Union[int, Tuple[int, int]]) -> bool:
+        """Checks whether the given `neuron_group` + partition contains a single neuron."""
+        if isinstance(group_id, int):
+            return self.neuron_group[group_id].number == 1
+        else:  # isinstance(group_id, tuple)
+            return self.neuron_group[group_id[0]].partition_size == 1
 
     #  - Neuron params:
     #    + float potential = 0;          // V
@@ -672,35 +756,38 @@ class ModelSaverLayers(object):
                 fh.write(struct.pack('>i', conn.kernel.shape[1]))
                 conn.kernel.astype('>f4').tofile(fh)
 
+        neuron_id = -1
         # -- Actual neuron parameters
         #   (Only synapses for Fully Connected layers are stored!)
         #  N x neuron:
         for i, group in enumerate(self.neuron_group):
             assert(group.number == group.thresholds.shape[0])
 
-            # Only fully connected layers parameters are saved in each neuron synapses
-            total_fully_conn_per_neuron = \
-                sum(1 for conn in group.connections
-                    if isinstance(conn, All2AllConn))
-
-            # Saving for each neuron neuron
+            # For each neuron, saving
             #  - Neuron params
             #  - Number of fully connected connections to it
-            #  Per fully connection
+            #  Per each fully connection
             #    - Range of neurons connected (to_start, to_end)
             #    - Synapses for range
             for j in range(group.number):
+                neuron_id += 1
                 # Neuron params
                 self._save_neuron_params(fh, j, group)
-                # number of synapses for fully connected per neuron
-                fh.write(struct.pack('>H', total_fully_conn_per_neuron))
+
+                total_fully_conn_for_neuron = \
+                    sum(1 for conn in group.connections
+                        if isinstance(conn, All2AllConn)
+                        and conn.from_[0] <= neuron_id <= conn.from_[1])
+                # number of fully connections that neuron takes part of
+                fh.write(struct.pack('>H', total_fully_conn_for_neuron))
 
                 for conn in group.connections:
                     # synapses
-                    if isinstance(conn, All2AllConn):
+                    if isinstance(conn, All2AllConn) \
+                            and conn.from_[0] <= neuron_id <= conn.from_[1]:
                         fh.write(struct.pack('>i', conn.to[0]))
                         fh.write(struct.pack('>i', conn.to[1]))
-                        conn.weights[j].astype('>f4').tofile(fh)
+                        conn.weights[neuron_id - conn.from_[0]].astype('>f4').tofile(fh)
 
 
 if __name__ == '__main__':

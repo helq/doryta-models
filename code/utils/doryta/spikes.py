@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import numpy as np
 import struct
+import pathlib
 
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, Union
 from numpy.typing import NDArray
 
 
 def save_spikes_for_doryta(
-    img: np.ndarray[Any, Any],
-    times: np.ndarray[Any, Any],
-    path: str,
+    img: Optional[np.ndarray[Any, Any]],
+    times: Optional[np.ndarray[Any, Any]],
+    path: Union[str, pathlib.Path],
     additional_spikes: Optional[Dict[int, NDArray[Any]]] = None
 ) -> None:
     """Saves sequence of spikes for each "image" (2nd dimension) at their given
-    timestamps (times). Assumes spikes to be encoded as ones and not spikes as zero.
-    Additional spikes must start after the last neuron in the images"""
+    timestamps (times, 1st dimension). Assumes spikes to be encoded as ones and not spikes
+    as zero. Additional spikes must start after the last neuron in the images"""
+    assert (img is None) == (times is None), "both, img and times, must be defined or None"
+    if img is None:
+        img = np.zeros((0, 0))
+    if times is None:
+        times = np.array((0,))
     assert len(img.shape) == 2
     assert len(times.shape) == 1
     assert img.shape[0] == times.shape[0]
