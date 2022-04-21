@@ -360,6 +360,12 @@ class SNCircuit(NamedTuple):
         return SNCircuit(outputs=self.outputs, inputs=inputs, neurons=self.neurons,
                          ids_to_int=self.ids_to_int)
 
+    def remove_inputs(self, inputs_to_del: List[int]) -> SNCircuit:
+        new_inputs = [in_ for i, in_ in enumerate(self.inputs)
+                      if i not in inputs_to_del]
+        return SNCircuit(outputs=self.outputs, inputs=new_inputs, neurons=self.neurons,
+                         ids_to_int=self.ids_to_int)
+
 
 if __name__ == '__main__':
     with open('snn-circuits/json/clock-smallest.json') as f:

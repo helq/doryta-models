@@ -19,9 +19,9 @@ def save_spikes_for_doryta(
     as zero. Additional spikes must start after the last neuron in the images"""
     assert (img is None) == (times is None), "both, img and times, must be defined or None"
     if img is None:
-        img = np.zeros((0, 0))
+        img = np.zeros((0, 0)).astype(int)
     if times is None:
-        times = np.array((0,))
+        times = np.zeros((0,))
     assert len(img.shape) == 2
     assert len(times.shape) == 1
     assert img.shape[0] == times.shape[0]

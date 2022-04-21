@@ -339,6 +339,33 @@ class ModelSaverLayers(object):
 
         self.neuron_group[from_layer].connections.append(all2all_conn)
 
+    def __find_start_end_for_neuron_group(
+        self, neuron_group_id: Union[int, Tuple[int, int]]
+    ) -> Tuple[int, int, int, NeuronParams]:
+        """
+        Given a neuron group id (either a single `int` (neuron group number) or tuple of
+        `int`s (neuron group number and partition number)), this function returns:
+        - the neuron id in which the given neuron group starts,
+        - the last neuron id of the neuron group, and
+        - number of neurons in group/partition (last id - first id + 1),
+        - the input neuron group.
+        """
+        # finding neuron id ranges for input layer
+        if isinstance(neuron_group_id, int):
+            assert 0 <= neuron_group_id < len(self.neuron_group)
+            neuron_group = self.neuron_group[neuron_group_id]
+            num_neurons = neuron_group.number
+            neuron_group_id = (neuron_group_id, 0)
+        else:
+            assert 0 <= neuron_group_id[0] < len(self.neuron_group)
+            neuron_group = self.neuron_group[neuron_group_id[0]]
+            num_neurons = neuron_group.partition_size
+
+        from_start = sum(self.neuron_group[i].number for i in range(neuron_group_id[0])) \
+            + num_neurons * neuron_group_id[1]
+        from_end = from_start + num_neurons - 1
+        return from_start, from_end, num_neurons, neuron_group
+
     def add_one2one_conn(
         self,
         from_: Union[int, Tuple[int, int]],
@@ -349,23 +376,10 @@ class ModelSaverLayers(object):
         When `from` (or `to`) is a tuple, the first value indicates the number of the
         layer and the second indicates the partition number within the layer.
         """
-        if isinstance(from_, int):
-            from_ = (from_, 0)
-        if isinstance(to, int):
-            to = (to, 0)
-        # finding neuron id ranges for input layer
-        assert from_[0] >= 0
-        input_neuron_group = self.neuron_group[from_[0]]
-        num_neurons = input_neuron_group.partition_size
-        from_start = sum(self.neuron_group[i].number for i in range(from_[0])) \
-            + num_neurons * from_[1]
-        from_end = from_start + num_neurons - 1
-
-        assert to[0] >= 0
-        num_neurons_in_to = self.neuron_group[to[0]].partition_size
-        to_start = sum(self.neuron_group[i].number for i in range(to[0])) \
-            + num_neurons * to[1]
-        to_end = to_start + num_neurons - 1
+        from_start, from_end, num_neurons, input_neuron_group = \
+            self.__find_start_end_for_neuron_group(from_)
+        to_start, to_end, num_neurons_in_to, _ = \
+            self.__find_start_end_for_neuron_group(to)
 
         if num_neurons != num_neurons_in_to:
             raise Exception(
@@ -381,6 +395,30 @@ class ModelSaverLayers(object):
         kernel = np.float_(weight).reshape((1, 1))
         conv = Conv2DConn(kernel, input_size, padding, striding)
         conv.set_from_and_to((from_start, from_end), (to_start, to_end))
+        input_neuron_group.connections.append(conv)
+
+    def add_conv2d_conn(
+        self,
+        kernel: NDArray[Any],
+        input_size: Tuple[int, int],
+        from_: Union[int, Tuple[int, int]],
+        to: Union[int, Tuple[int, int]],
+        padding: Tuple[int, int] = (0, 0),
+        striding: Tuple[int, int] = (1, 1)
+    ) -> None:
+        # check that kernel is 2 dimensions
+        assert len(kernel.shape) == 2
+
+        # check from and to
+        from_start, from_end, num_neurons, input_neuron_group = \
+            self.__find_start_end_for_neuron_group(from_)
+        to_start, to_end, num_neurons_in_to, _ = \
+            self.__find_start_end_for_neuron_group(to)
+
+        # create connection
+        conv = Conv2DConn(kernel, input_size, padding, striding)
+        conv.set_from_and_to((from_start, from_end), (to_start, to_end))
+        # add connection to respective neuron group
         input_neuron_group.connections.append(conv)
 
     def add_fully_layer(
