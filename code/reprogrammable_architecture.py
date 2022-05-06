@@ -25,15 +25,15 @@ def load_NOTable_ANDOR_gate(circuits_folder: Path, heartbeat: float = 1) -> SNCi
     andOr_gate_act = and3.connect(
         cycle3, incoming=[(0, 0)], self_id='and3', other_id='cycle3')
 
-    notableAndOr_gate_act = andOr_gate_act.connect(
+    aor_gate_act = andOr_gate_act.connect(
         not_gate_act, outgoing=[(0, 0)], self_id='andOr', other_id='not'
     )
 
-    return notableAndOr_gate_act
+    return aor_gate_act
 
 
 def build_reconf_gate_model_1(
-    notableAndOr_gate_act: SNCircuit, num_gates: int = 5, heartbeat: float = 1
+    aor_gate_act: SNCircuit, num_gates: int = 5, heartbeat: float = 1
 ) -> ModelSaverLayers:
     msaver = ModelSaverLayers(dt=heartbeat)
     # Layer 0: multiple settings: deactivate AND/OR, deactivate NOT, gate pass-on
@@ -48,7 +48,7 @@ def build_reconf_gate_model_1(
 
     input_layers: List[Union[Tuple[int, int], int]]
     input_layers = [3, 4, 1, (0, 0), (0, 2), 2, (0, 1)]
-    #                                            inputs to notableAndOr_gate_act circuit
+    #                                            inputs to aor_gate_act circuit
     # layer 3      <- 'andOr.and3.gate-in/output' <- {0: SynapParams(weight=0.5, delay=1)},
     # layer 4      <- 'andOr.and3.gate-in/output' <- {0: SynapParams(weight=0.5, delay=1)},
     # layer 1      <- 'andOr.cycle3.start'        <- {3: SynapParams(weight=1.0, delay=1)},
@@ -56,19 +56,19 @@ def build_reconf_gate_model_1(
     # layer (0, 2) <- 'not.xor.pass-on'           <- {6: SynapParams(weight=0.5, delay=1)},
     # layer 2      <- 'not.cycle3.start'          <- {9: SynapParams(weight=1.0, delay=1)},
     # layer (0, 1) <- 'not.cycle3.stop'           <- {8: SynapParams(weight=1.0, delay=1)}
-    msaver.add_sncircuit_layer(notableAndOr_gate_act, input_layers)
+    msaver.add_sncircuit_layer(aor_gate_act, input_layers)
 
     return msaver
 
 
 def build_reconf_gate_model_2(
-    notableAndOr_gate_act: SNCircuit,
+    aor_gate_act: SNCircuit,
     gate_keeper: SNCircuit,
     num_gates: int = 5, heartbeat: float = 1
 ) -> ModelSaverLayers:
     # this line removes the duplicated input to neuron 'andOr.and3.in/gate-output'
     # This connection is later realized by a conv2d connection
-    notableAndOr_gate_act = notableAndOr_gate_act.remove_inputs([0, 1])
+    aor_gate_act = aor_gate_act.remove_inputs([0, 1])
 
     msaver = ModelSaverLayers(dt=heartbeat)
     # Layer 0: multiple settings: deactivate AND/OR, NOT and gate keeper; and gate pass-on
@@ -97,26 +97,26 @@ def build_reconf_gate_model_2(
     # Layer 6:
     input_layers: List[Union[Tuple[int, int], int]]
     input_layers = [1, (0, 0), (0, 3), 2, (0, 1)]
-    #                                            inputs to notableAndOr_gate_act circuit
+    #                                            inputs to aor_gate_act circuit
     # layer 1      <- 'andOr.cycle3.start'     <- {3: SynapParams(weight=1.0, delay=1)},
     # layer (0, 0) <- 'andOr.cycle3.stop'      <- {2: SynapParams(weight=1.0, delay=1)},
     # layer (0, 3) <- 'not.xor.pass-on'        <- {6: SynapParams(weight=0.5, delay=1)},
     # layer 2      <- 'not.cycle3.start'       <- {9: SynapParams(weight=1.0, delay=1)},
     # layer (0, 1) <- 'not.cycle3.stop'        <- {8: SynapParams(weight=1.0, delay=1)}
-    msaver.add_sncircuit_layer(notableAndOr_gate_act, input_layers)
+    msaver.add_sncircuit_layer(aor_gate_act, input_layers)
 
     # connections from gate keepers to AND/OR gates
     msaver.add_conv2d_conn(
         kernel=np.ones((1, num_gates)) * 0.5,
         input_size=(num_gates, num_gates),
         from_=(5, gate_keeper.ids_to_int['gate']),
-        to=(6, notableAndOr_gate_act.ids_to_int['andOr.and3.gate-in/output']))
+        to=(6, aor_gate_act.ids_to_int['andOr.and3.gate-in/output']))
 
     return msaver
 
 
 def spikes_gate_model_1(
-    num_gates: int, circuit: SNCircuit
+    num_gates: int, aor_gate_act: SNCircuit
 ) -> Tuple[Dict[int, NDArray[Any]], int]:
     # params
     stop_andOr = 0
@@ -127,7 +127,7 @@ def spikes_gate_model_1(
     input1_shift = andOr_act_shift + 2 * num_gates
     input2_shift = input1_shift + num_gates
     # the circuit has only one output
-    output_layer_shift = input2_shift + num_gates + circuit.outputs[0] * num_gates
+    output_layer_shift = input2_shift + num_gates + aor_gate_act.outputs[0] * num_gates
 
     spikes = {
         # Global parameters (pass_on for NOT gate, and reset params)
@@ -160,7 +160,7 @@ def spikes_gate_model_1(
 
 
 def spikes_gate_model_2(
-    num_gates: int, circuit: SNCircuit, gate_keeper_circuit: SNCircuit
+    num_gates: int, aor_gate_act: SNCircuit, gate_keeper_circuit: SNCircuit
 ) -> Tuple[Dict[int, NDArray[Any]], int]:
     assert num_gates >= 4
     # params
@@ -203,14 +203,14 @@ def spikes_gate_model_2(
         print(f" Neuron '{neuron_name}': [{neuron_shift}, {neuron_shift + num_gates**2 - 1}]")
     # layer 6
     andOr_circuit_shift = gate_keeper_shift + layer_size
-    layer_size = circuit.num_neurons * num_gates
+    layer_size = aor_gate_act.num_neurons * num_gates
     print(f"Layer 6: [{andOr_circuit_shift}, {andOr_circuit_shift + layer_size - 1}]\t"
           "AND/OR NOT circuit")
-    for neuron_name, neu_num in circuit.ids_to_int.items():
+    for neuron_name, neu_num in aor_gate_act.ids_to_int.items():
         neuron_shift = andOr_circuit_shift + neu_num * num_gates
         print(f" Neuron '{neuron_name}': [{neuron_shift}, {neuron_shift + num_gates - 1}]")
     # layer 6.out_0
-    output_layer_shift = andOr_circuit_shift + circuit.outputs[0] * num_gates
+    output_layer_shift = andOr_circuit_shift + aor_gate_act.outputs[0] * num_gates
 
     n = num_gates
 
@@ -232,17 +232,17 @@ def spikes_gate_model_2(
         # The inputs for all gates are the same:
         # - two spikes at time "0" (1)
         # - one spike at time "1" (4)
-        # - one spike at time "2" (4)
-        # - no spikes at time "3" (7)
+        # - one spike at time "2" (7)
+        # - no spikes at time "3" (10)
         (input_shift + 0):     1 + 3 * np.array([0, 1]),
         (input_shift + 1):     1 + 3 * np.array([0, 2]),
-        # AND gate (output only at time "1" (6))
+        # AND gate (output only at time "1" (7))
         # no activation
-        # OR gate (output at times "1" and "2" (6 and 9))
+        # OR gate (output at times "1" and "2" (7 and 10))
         (andOr_act_shift + 1): 1 + 3 * np.array([0]),
-        # NAND gate (output at times "2" and "3" (9 and 12))
+        # NAND gate (output at times "2" and "3" (10, 13 and 16))
         (not_act_shift + 2):   2 + 3 * np.array([0]),
-        # NOR gate (output at time "3" (12))
+        # NOR gate (output at time "3" (16))
         (andOr_act_shift + 3): 1 + 3 * np.array([0]),
         (not_act_shift + 3):   2 + 3 * np.array([0]),
     }
@@ -255,16 +255,16 @@ if __name__ == '__main__':
     num_gates = 5
 
     heartbeat = 1
-    circuit = load_NOTable_ANDOR_gate(dump_folder / 'json', heartbeat)
+    aor_gate_act = load_NOTable_ANDOR_gate(dump_folder / 'json', heartbeat)
 
     # Gate structure model 1
-    if False:
+    if True:
         # ===== Saving circuit ======
-        msaver = build_reconf_gate_model_1(circuit, num_gates=5)
+        msaver = build_reconf_gate_model_1(aor_gate_act, num_gates=5)
         msaver.save(dump_folder / 'snn-models' / f"reconfigurable-{num_gates}-gates.doryta.bin")
 
         # ====== Saving spikes ======
-        spikes, output_layer_shift = spikes_gate_model_1(num_gates, circuit)
+        spikes, output_layer_shift = spikes_gate_model_1(num_gates, aor_gate_act)
         save_spikes_for_doryta(
             None, None,
             dump_folder / 'spikes' / f'reconfigurable-gate-model-v1-test1-gates={num_gates}',
@@ -275,17 +275,18 @@ if __name__ == '__main__':
               f"[{output_layer_shift}, {output_layer_shift + num_gates - 1}]")
 
     # Gate structure model 2
-    if True:
+    if False:
         # ===== Saving circuit ======
         gate_keeper_circuit = SNCircuit.load_json(dump_folder / 'json' / 'gate-keeper.json',
                                                   {'heartbeat': heartbeat})
-        msaver = build_reconf_gate_model_2(circuit, gate_keeper_circuit,
+        msaver = build_reconf_gate_model_2(aor_gate_act, gate_keeper_circuit,
                                            num_gates=num_gates)
         msaver.save(dump_folder / 'snn-models'
                     / f"reconfigurable-gate-model-v2-gates={num_gates}.doryta.bin")
 
         # ====== Saving spikes ======
-        spikes, output_layer_shift = spikes_gate_model_2(num_gates, circuit, gate_keeper_circuit)
+        spikes, output_layer_shift = \
+            spikes_gate_model_2(num_gates, aor_gate_act, gate_keeper_circuit)
         save_spikes_for_doryta(
             None, None,
             dump_folder / 'spikes' / f'reconfigurable-gate-model-v2-test1-gates={num_gates}',
