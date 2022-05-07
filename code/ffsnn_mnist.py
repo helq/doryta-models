@@ -19,6 +19,7 @@ import os
 # import sys
 import numpy as np
 import struct
+import argparse
 
 # import keras
 from tensorflow.keras.models import Sequential
@@ -197,33 +198,39 @@ def save_spikes_slice(x_test: Any, y_test: Any, sl: slice) -> None:
 
 
 if __name__ == '__main__':  # noqa: C901
-    # This is super good but produces negative values for the matrix, ie, negative currents :S
-    # initializer = 'glorot_uniform'
-    # weight_constraints = None
-    # # sharpener params
-    # start_epoch = 5
-    # sharp_steps = 5
-    # total_brelus = 3
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--fashion', action=argparse.BooleanOptionalAction,
+                        help='MNIST or Fashion-MNIST (default: no, i.e, MNIST)')
+    args = parser.parse_args()
 
-    # This is experimental. Forcing non-negative weights
-    # It works, but the initialization has to be precise (and there is a considerable loss
-    # in accuracy!)
-    initializer: Any = lambda x: RandomUniform(minval=0.0, maxval=1.0 / x)  # noqa: E731
-    weight_constraints = constraints.NonNeg()
-    # sharpener params
-    start_epoch = 10
-    sharp_steps = 5
-    total_brelus = 3
+    dataset = 'fashion-mnist' if args.fashion else 'mnist'
 
-    temporal_encoding = True
+    experimental = False
+    if not experimental:
+        # This is super good but produces negative values for the matrix, ie, negative currents :S
+        initializer: Any = 'glorot_uniform'
+        weight_constraints = None
+        # sharpener params
+        start_epoch = 5
+        sharp_steps = 5
+        total_brelus = 3
+    else:
+        # This is experimental. Forcing non-negative weights
+        # It works, but the initialization has to be precise (and there is a considerable loss
+        # in accuracy!)
+        initializer = lambda x: RandomUniform(minval=0.0, maxval=1.0 / x)  # noqa: E731
+        weight_constraints = constraints.NonNeg()
+        # sharpener params
+        start_epoch = 10
+        sharp_steps = 5
+        total_brelus = 3
 
-    loading_model = True
+    temporal_encoding = False
+
+    loading_model = False
     training_model = False
     checking_model = False
     saving_model = False
-
-    dataset = 'mnist'
-    # dataset = 'fashion-mnist'
 
     if initializer == 'glorot_uniform':
         model_path = f'ffsnn-{dataset}'
@@ -324,9 +331,10 @@ if __name__ == '__main__':  # noqa: C901
         save_spikes_slice(x_test, y_test, slice(1950, 2000))
 
     # Saving all images as spikes
-    if False:
+    if True:
         range_ = ...
-        path = f"mnist/spikes/spikified-{dataset}/spikified-images-all-shifted"
+        path = f"mnist/spikes/spikified-{dataset}/spikified-images-all"
+        # path = f"mnist/spikes/spikified-{dataset}/spikified-images-all-shifted"
 
         imgs = (x_test[range_] > .5).astype(int)
         print("Total images:", y_test[range_].shape[0])
@@ -356,7 +364,7 @@ if __name__ == '__main__':  # noqa: C901
             show_prediction(model, model_intermediate, (x_test[i:i+1] > .5).astype(int))
 
     # Saving one (or many) images (TEMPORAL ENCODING)
-    if True and temporal_encoding:
+    if False and temporal_encoding:
         interval = slice(0, 1)
         # interval = slice(0, 3)
         # interval = slice(0, 100)
@@ -392,10 +400,10 @@ if __name__ == '__main__':  # noqa: C901
                    f"interval-{interval.start}-to-{interval.stop - 1}-" \
                    f"grayscale=[{','.join(str(c) for c in cuts)}]"
 
+        save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
+        save_tags_for_doryta(y_test[interval], path)
+
         print("Classes of images:", klass)
         if True and (loading_model or training_model):
             for j in range(len(cuts)):
                 show_prediction(model, model_intermediate, spikes[j:j+1, :28*28])
-
-        save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
-        save_tags_for_doryta(y_test[interval], path)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Tuple, Union, Optional
 import pathlib
+import argparse
 import os
 # import sys
 import numpy as np
@@ -85,22 +86,36 @@ def load_models(path: Union[str, pathlib.Path]) -> Tuple[Any, Any]:
 
 
 if __name__ == '__main__':  # noqa: C901
-    # filters = (32, 48)
-    filters = (6, 16)
-    # dataset = 'mnist'
-    dataset = 'fashion-mnist'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--fashion', action=argparse.BooleanOptionalAction,
+                        help='MNIST or Fashion-MNIST (default: no, i.e, MNIST)')
+    parser.add_argument('--large-lenet', action=argparse.BooleanOptionalAction,
+                        help='Small or Large LeNet (default: no, i.e, small)')
+    parser.add_argument('--train', action=argparse.BooleanOptionalAction,
+                        help='Load from memory or train model (default: no, i.e, load)')
+    parser.add_argument('--save', action=argparse.BooleanOptionalAction,
+                        help='Save model as Doryta file (default: no)')
+    args = parser.parse_args()
+
+    dataset = 'fashion-mnist' if args.fashion else 'mnist'
+    filters = (32, 48) if args.large_lenet else (6, 16)
+    saving_model = args.save
+    if args.train:
+        loading_model = False
+        training_model = True
+    else:
+        loading_model = True
+        training_model = False
+
     model_path = pathlib.Path(f'lenet-{dataset}-filters={filters[0]},{filters[1]}')
 
     # This is super good but produces negative values for the matrix, ie, negative currents :S
     initializer = 'glorot_uniform'
     # initializer = RandomUniform(minval=0.0, maxval=1.0)
 
-    temporal_encoding = True
+    temporal_encoding = False
 
-    loading_model = True
-    training_model = False
-    checking_model = False
-    saving_model = True
+    checking_model = True
 
     (x_train, y_train), (x_test, y_test) = load_data(dataset)
     x_train = x_train.reshape((-1, 28, 28, 1))
