@@ -1,7 +1,7 @@
 import numpy as np
 from pathlib import Path
 
-from .utils.doryta.model_saver import ModelSaverLayers
+from .doryta_io.model_saver import ModelSaverLayers
 from .circuits.base import SNCircuit
 
 if __name__ == '__main__':

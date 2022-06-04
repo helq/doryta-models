@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 import numbers
 from itertools import chain
 
-from ...circuits.base import SNCircuit
+from ..circuits.base import SNCircuit
 
 from typing import BinaryIO, List, Union, Any, Tuple, NamedTuple, Optional, Dict
 

@@ -20,10 +20,10 @@ from tensorflow.keras import Model
 from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
 from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
 
+from .doryta_io.model_saver import ModelSaverLayers
+from .doryta_io.spikes import save_spikes_for_doryta
 from .utils.common_mnist import my_key, load_data, keras_model_path, doryta_model_path
-from .utils.doryta.model_saver import ModelSaverLayers
 from .utils.temp_encoding import img_to_tempencoding
-from .utils.doryta.spikes import save_spikes_for_doryta
 from .ffsnn_mnist import save_tags_for_doryta
 
 

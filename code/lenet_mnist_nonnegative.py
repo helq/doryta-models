@@ -17,7 +17,7 @@ from .whetstone.layers import Spiking_BRelu, Softmax_Decode
 from .whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
 
 from .utils.common_mnist import my_key, load_data, keras_model_path, doryta_model_path
-from .utils.doryta.model_saver import ModelSaverLayers
+from .doryta_io.model_saver import ModelSaverLayers
 
 
 def create_model(filters: Tuple[int, int],

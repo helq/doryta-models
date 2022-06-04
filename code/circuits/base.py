@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import json
 import pathlib
 
 import numpy as np
 from numpy.typing import NDArray
 
+from .ast import SNFile, Version, ParamName, ParamValue, Token, SynapseParams
+
 from typing import NamedTuple, List, Dict, Optional, Union, Any, Tuple
+from collections.abc import Iterable
 
 
 class NeuronParams(NamedTuple):
@@ -21,7 +23,7 @@ class NeuronParams(NamedTuple):
 
 class SynapParams(NamedTuple):
     weight: float
-    delay: float
+    delay: int
 
 
 class Neuron(NamedTuple):
@@ -29,42 +31,77 @@ class Neuron(NamedTuple):
     synapses: Dict[int, SynapParams]
 
 
-class GenerateParams:
-    def __init__(self, args: Dict[str, float]):
-        self.args = args
+def _raise_if_false(question: bool, msg: str) -> None:
+    if not question:
+        raise ValueError(msg)
 
-    def determine_global(
-        self,
-        params: Dict[str, Union[float, str]],
-        key: str,
-        default: Optional[float] = None
-    ) -> Optional[float]:
-        # TODO: Actually, delay is an `int`
-        # assert all(isinstance(p, (float, str)) for p in params.values())
-        if key not in params:
-            return default
-        val = params[key]
-        if isinstance(val, str):
-            assert val in self.args
-            return self.args[val]
-        return val
 
-    def determine_param(
-        self,
-        params: Dict[str, Union[float, str]],
-        key: str,
-        default: Optional[float] = None
-    ) -> float:
-        # assert all(isinstance(p, (float, str)) for p in params.values())
-        if key not in params:
-            if default is None:
-                raise Exception(f"The parameter `{key}` has no default.")
-            return default
-        val = params[key]
-        if isinstance(val, str):
-            assert val in self.args
-            return self.args[val]
-        return val
+def _params_from_ast_params(  # noqa: C901
+    args:        Dict[str, Union[float, int]],
+    params_dict: Dict[ParamName, ParamValue],
+    defaults:    Optional[Dict[str, Union[float, int]]] = None,
+    keys:        Optional[Iterable[str]] = None,
+    alias_keys:  Optional[Dict[str, str]] = None
+) -> Dict[str, Union[float, int]]:
+    """
+    This function takes a dictionary of AST parameters and returns a dictionary with no
+    "gaps" (variable/argument names). All gaps are filled with the data given by `args`.
+    The output dictionary can be initialized with a `defaults` input dict.
+    The keys/parameters can be restricted to `keys`.
+    `alias_keys` determines the aliases for all parameters
+    """
+    if defaults is None:
+        params = {}
+    elif keys is None:
+        params = defaults.copy()
+    else:
+        if alias_keys is not None:
+            keys = set(keys).union(alias_keys)
+            # checking that final aliases should be contained within keys
+            assert len(set(alias_keys.values()) - keys) == 0
+        params = {k: defaults[k] for k in keys if k in defaults}
+
+    # Removing converting all aliases into the same key
+    if alias_keys is not None:
+        for old_key, new_key in alias_keys.items():
+            if old_key in params:
+                assert new_key not in params
+                params[new_key] = params.pop(old_key)
+
+    for name, p_val in params_dict.items():
+        # Parameter name
+        p_name = name.value
+        if alias_keys is not None and p_name in alias_keys:
+            p_name = alias_keys[p_name]  # replacing key for alias
+
+        if isinstance(p_val.value, Token):
+            token_name = p_val.value.value
+            if token_name not in args:
+                raise ValueError(f"No argument `{p_val.value}` given")
+            # The parameter's value is the one from args
+            params[p_name] = args[token_name]
+        else:
+            # The parameter's value is the one from params
+            params[p_name] = p_val.value
+
+    return params
+
+
+def _synapses_from_ast_synapses(
+    ast_synapses: Dict[Token, SynapseParams],
+    args: Dict[str, Union[float, int]],
+    g_params: Dict[str, Union[float, int]],
+    ids_to_int: Dict[str, int],
+) -> Dict[int, SynapParams]:
+    synapses = {}
+    for n, s in ast_synapses.items():
+        # n: neuron that synapse points to (Token)
+        # s: synapse parameters (SynapseParams)
+        s_params = _params_from_ast_params(
+            args, s.params, g_params, keys=['weight', 'delay'])
+        assert type(s_params['delay']) is int
+        synapses[ids_to_int[n.value]] = SynapParams(**s_params)  # type: ignore
+    return synapses
 
 
 class SNCircuit(NamedTuple):
@@ -77,12 +114,10 @@ class SNCircuit(NamedTuple):
     their parent objects or children.
     """
     # TODO: change the type of all variables from mutable objects to immutable
-    # args: List[Var]
     outputs: List[int]
     inputs: List[Dict[int, SynapParams]]
     neurons: Dict[int, Neuron]
     ids_to_int: Dict[str, int]
-    # inject: Something[SNCircuit]
 
     def same_as(self, other: SNCircuit) -> bool:
         """
@@ -102,93 +137,54 @@ class SNCircuit(NamedTuple):
             data = f.read()
         return SNCircuit.loads_json(data, args)
 
-    # Yes, littering this with `asserts` is not the proper way to construct the function.
-    # Ideally, it should raise Exceptions for every single thing it finds it's weird.
-    # Assertions are simpler to write and thus easier to develop code with than Exceptions
-    # which require a custom message.
-    # TODO: change `assert`s for raising Exceptions
     @classmethod
     def loads_json(
         cls,
         data: str,
         args: Dict[str, float]
     ) -> SNCircuit:
-        args_ = GenerateParams(args)
+        ast_circuit = SNFile.from_json(data)
+        return SNCircuit.from_ast(ast_circuit, args)
 
-        obj = json.loads(data)
-        assert isinstance(obj, dict)
-        assert obj['version'] == '0.0.1'
-        assert isinstance(obj['args'], list)
-        assert sorted(obj['args']) == sorted(args.keys())
-        assert isinstance(obj['params'], dict)
+    @classmethod
+    def from_ast(
+        cls,
+        ast: SNFile,
+        args: Dict[str, float]
+    ) -> SNCircuit:
+        _raise_if_false(ast.version == Version(0, 0, 1), f"Version {ast.version} unsupported")
+        _raise_if_false(sorted(arg.value for arg in ast.args) == sorted(args.keys()),
+                        "Arguments given do not correspond to arguments needed")
 
-        # neuron parameters
-        g_resistance = args_.determine_global(obj['params'], 'R')
-        g_capacitance = args_.determine_global(obj['params'], 'C')
-        g_threshold = args_.determine_global(obj['params'], 'threshold')
-        g_potential = args_.determine_global(obj['params'], 'potential', 0.0)
-        g_current = args_.determine_global(obj['params'], 'current', 0.0)
-        g_resting_potential = args_.determine_global(obj['params'], 'resting_potential', 0.0)
-        g_reset_potential = args_.determine_global(obj['params'], 'rest_potential', 0.0)
-        # synapses parameters
-        g_weight = args_.determine_global(obj['params'], 'weight')
-        g_delay = args_.determine_global(obj['params'], 'delay')
+        defaults_params = {
+            'potential': 0.0,
+            'current': 0.0,
+            'resting_potential': 0.0,
+            'reset_potential': 0.0,
+        }
+        g_params = _params_from_ast_params(args, ast.params, defaults_params)
+        ids_to_int = {k.value: i for i, k in enumerate(ast.neurons.keys())}
 
-        obj_neurons = obj['neurons']
-        assert isinstance(obj_neurons, dict)
-        ids_to_int = {k: i for i, k in enumerate(obj_neurons.keys())}
         neurons = {}
-        for neuron_id, n_dict in obj_neurons.items():
-            assert isinstance(n_dict, dict)
+        for neuron_tok, neuron_def in ast.neurons.items():
+            n_params = _params_from_ast_params(
+                args, neuron_def.params, g_params,
+                keys=['resistance', 'capacitance', 'threshold', 'potential', 'current',
+                      'resting_potential', 'reset_potential'],
+                alias_keys={'R': 'resistance', 'C': 'capacitance'})
 
-            n_params = n_dict["params"] if "params" in n_dict else {}
-            assert isinstance(n_params, dict)
-            # assert all(isinstance(p, str) and isinstance(v, (str, float))
-            #            for p, v in n_params.items())
-
-            n_synapses = n_dict["synapses"] if "synapses" in n_dict else {}
-            assert isinstance(n_synapses, dict)
-            # assert all(isinstance(p, str) and isinstance(v, (str, float))
-            #            for p, v in n_synapses.items())
-
-            neurons[ids_to_int[neuron_id]] = Neuron(
-                params=NeuronParams(
-                    resistance=args_.determine_param(n_params, 'R', g_resistance),
-                    capacitance=args_.determine_param(n_params, 'C', g_capacitance),
-                    threshold=args_.determine_param(n_params, 'threshold', g_threshold),
-                    potential=args_.determine_param(n_params, 'potential', g_potential),
-                    current=args_.determine_param(n_params, 'current', g_current),
-                    resting_potential=args_.determine_param(
-                        n_params, 'resting_potential', g_resting_potential),
-                    reset_potential=args_.determine_param(
-                        n_params, 'reset_potential', g_reset_potential)
-                ),
-                synapses={
-                    ids_to_int[n]: SynapParams(
-                        weight=args_.determine_param(s_params, 'weight', g_weight),
-                        delay=args_.determine_param(s_params, 'delay', g_delay)
-                    )
-                    for n, s_params in n_synapses.items()
-                }
+            neurons[ids_to_int[neuron_tok.value]] = Neuron(
+                params=NeuronParams(**n_params),
+                synapses=_synapses_from_ast_synapses(
+                    neuron_def.synapses, args, g_params, ids_to_int)
             )
 
-        obj_outputs = obj['outputs']
-        assert isinstance(obj_outputs, list)
-        assert all(o in obj_neurons for o in obj_outputs)
-        outputs = [ids_to_int[o] for o in obj_outputs]
-
-        obj_inputs = obj['inputs']
-        assert isinstance(obj_inputs, list)
-        assert all(isinstance(i, dict) and all(n in obj_neurons for n in i) for i in obj_inputs)
-        inputs = [{
-            ids_to_int[n]: SynapParams(
-                weight=args_.determine_param(s_params, 'weight', g_weight),
-                delay=args_.determine_param(s_params, 'delay', g_delay)
-            )
-            for n, s_params in input.items()
-        } for input in obj_inputs]
-
-        return SNCircuit(outputs=outputs, inputs=inputs, neurons=neurons, ids_to_int=ids_to_int)
+        return SNCircuit(
+            outputs=[ids_to_int[o.value] for o in ast.outputs],
+            inputs=[_synapses_from_ast_synapses(input, args, g_params, ids_to_int)
+                    for input in ast.inputs],
+            neurons=neurons,
+            ids_to_int=ids_to_int)
 
     def get_params_in_bulk(self) -> Dict[str, NDArray[Any]]:
         neuron_args = {  # type: ignore

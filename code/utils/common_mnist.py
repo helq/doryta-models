@@ -21,7 +21,7 @@ def my_key() -> np.ndarray:  # type: ignore
 
 
 def plot_img(img: np.ndarray) -> None:  # type: ignore
-    plt.imshow(img.reshape((28, 28)))
+    plt.imshow(img.reshape((28, 28)), cmap='Greys')
     plt.show()
 
 

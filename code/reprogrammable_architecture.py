@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import List, Tuple, Union, Dict, Any
 from numpy.typing import NDArray
 
-from .utils.doryta.model_saver import ModelSaverLayers
-from .utils.doryta.spikes import save_spikes_for_doryta
+from .doryta_io.model_saver import ModelSaverLayers
+from .doryta_io.spikes import save_spikes_for_doryta
 from .circuits.base import SNCircuit
 
 
