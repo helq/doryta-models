@@ -2,7 +2,7 @@ import numpy as np
 from pathlib import Path
 
 from .doryta_io.model_saver import ModelSaverLayers
-from .circuits.base import SNCircuit
+from .circuits import from_json_path
 
 if __name__ == '__main__':
     dump_folder = Path('gol/snn-models/')
@@ -18,8 +18,7 @@ if __name__ == '__main__':
 
     # NO NEGATIVE WEIGHTS
     heartbeat = 1 / 5
-    sngol = SNCircuit.load_json(
-        'gol/json/gol-nonnegative-v1.json', {'heartbeat': heartbeat})
+    sngol = from_json_path('gol/json/gol-nonnegative-v1.json', {'heartbeat': heartbeat})
 
     msaver = ModelSaverLayers(dt=heartbeat)
     msaver.add_conv2d_layer(k1, t1, (20, 20), (1, 1), (1, 1))
@@ -29,8 +28,7 @@ if __name__ == '__main__':
 
     # NO NEGATIVE WEIGHTS AND NO LEAK
     heartbeat = 1 / 5
-    sngol2 = SNCircuit.load_json(
-        'gol/json/gol-no-leak.json', {'heartbeat': heartbeat})
+    sngol2 = from_json_path('gol/json/gol-no-leak.json', {'heartbeat': heartbeat})
 
     msaver = ModelSaverLayers(dt=heartbeat)
     msaver.add_conv2d_layer(k1, t1, (20, 20), (1, 1), (1, 1))

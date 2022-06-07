@@ -6,17 +6,17 @@ from numpy.typing import NDArray
 
 from .doryta_io.model_saver import ModelSaverLayers
 from .doryta_io.spikes import save_spikes_for_doryta
-from .circuits.base import SNCircuit
+from .circuits import SNCircuit, from_json_path
 
 
 def load_NOTable_ANDOR_gate(circuits_folder: Path, heartbeat: float = 1) -> SNCircuit:
-    xor_extern = SNCircuit.load_json(
+    xor_extern = from_json_path(
         circuits_folder / 'xor-externally-activated.json',
         {'heartbeat': heartbeat})
-    cycle3 = SNCircuit.load_json(
+    cycle3 = from_json_path(
         circuits_folder / 'turnable-cycle-3-long.json',
         {'heartbeat': heartbeat})
-    and3 = SNCircuit.load_json(
+    and3 = from_json_path(
         circuits_folder / 'and-gate-3-inputs.json',
         {'heartbeat': heartbeat})
 
@@ -277,8 +277,8 @@ if __name__ == '__main__':
     # Gate structure model 2
     if False:
         # ===== Saving circuit ======
-        gate_keeper_circuit = SNCircuit.load_json(dump_folder / 'json' / 'gate-keeper.json',
-                                                  {'heartbeat': heartbeat})
+        gate_keeper_circuit = from_json_path(dump_folder / 'json' / 'gate-keeper.json',
+                                             {'heartbeat': heartbeat})
         msaver = build_reconf_gate_model_2(aor_gate_act, gate_keeper_circuit,
                                            num_gates=num_gates)
         msaver.save(dump_folder / 'snn-models'

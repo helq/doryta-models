@@ -3,51 +3,12 @@ from __future__ import annotations
 import json
 import re
 
-from typing import NamedTuple, List, Union, Dict, Any, Optional, Type, TypeVar, Protocol
+from typing import NamedTuple, List, Union, Dict, Any, Type
+from ..base import _check_and_raise_error, AST, T, T2, Version
 
 
-version_re = re.compile(r'(\d+)\.(\d+)\.(\d+)([a-z]?)')
 token_re = re.compile(r'[a-z][a-zA-Z0-9/_-]*')
 param_re = re.compile(r'\w+')
-
-
-def _check_and_raise_error(val: Any, type_: Type[Any], val_name: str) -> None:
-    if not isinstance(val, type_):
-        raise ValueError(val_name + f" must be of type `{type_.__name__}` but it is "
-                                    f"`{type(val).__name__}`")
-
-
-T_cov = TypeVar('T_cov', covariant=True)
-T = TypeVar('T')
-T2 = TypeVar('T2')
-
-
-class AST(Protocol[T_cov]):
-    """
-    All ast classes must comply with this specification/protocol. This is used when
-    passing generic ast classes/objects down to other functions. See
-    `_load_list_from_json_dict` for a usage example.
-    """
-    @classmethod
-    def from_json_obj(cls, val: Any) -> T_cov:
-        raise NotImplementedError
-
-
-class Version(NamedTuple):
-    major: int
-    minor: int
-    revision: int
-    revision_minor: Optional[str] = None  # single alphanumeric character
-
-    @classmethod
-    def from_json_obj(cls, val: str) -> Version:
-        _check_and_raise_error(val, str, "A token")
-
-        match = version_re.fullmatch(val)
-        if match is None:
-            raise ValueError(f"The string `{val}` cannot be interpreted as vX.X.Xz")
-        rev_minor = match[4] if match[4] else None
-        return Version(int(match[1]), int(match[2]), int(match[3]), rev_minor)
 
 
 class Token(NamedTuple):
