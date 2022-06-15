@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 import re
 
 from typing import NamedTuple, List, Union, Dict, Any, Type
+
 from ..base import _check_and_raise_error, AST, T, T2, Version
 
 
@@ -74,9 +74,9 @@ def _load_list_from_json_dict(
 
     ```python
         >>> inp = {'args': ['a', 'b'], 'output': ['that']}
-        >>> _load_dict_from_json_dict(inp, "args", Token, msg="args")
+        >>> _load_list_from_json_dict(inp, "args", Token, msg="args")
         [Token('a'), Token('b')]
-        >>> _load_dict_from_json_dict(inp, "output", Token, msg="output")
+        >>> _load_list_from_json_dict(inp, "output", Token, msg="output")
         [Token('that')]
     ```
     """
@@ -121,8 +121,6 @@ class NeuronDef(NamedTuple):
 
 class SNFile(NamedTuple):
     version: Version
-    # description: str
-    # neuron_type: NeuronType
     args: List[Token]
     params: Dict[ParamName, ParamValue]
     outputs: List[Token]
@@ -162,14 +160,3 @@ class SNFile(NamedTuple):
             inputs=inputs,
             neurons=_load_dict_from_json_dict(inp, 'neurons', Token, NeuronDef, msg="`neurons`")
         )
-
-    @classmethod
-    def from_json(self, data: str) -> SNFile:
-        """This is the closest we have to a parser up to this point"""
-        try:
-            obj = json.loads(data)
-        except json.JSONDecodeError:
-            raise
-        if not isinstance(obj, dict):
-            raise ValueError(f'The json document does not contain a "dict" instead {type(obj)}')
-        return self.from_json_obj(obj)

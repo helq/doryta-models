@@ -1,18 +1,20 @@
+import json
+
 from typing import Dict, Union, Optional, Any
 from collections.abc import Iterable
 
 from .ast import SNFile, ParamName as AstParamName, ParamValue as AstParamValue, \
     Token as AstToken, SynapseParams as AstSynapseParams
 from ..base import Version
-from ...sncircuit import SNCircuit, SynapParams, Neuron, NeuronParams
+from ...sncircuit import SNCircuit, SynapParams, Neuron, LIF
 
 
 def from_json_str(
     data: str,
     args: Dict[str, float]
 ) -> SNCircuit:
-    ast_circuit = SNFile.from_json(data)
-    return from_ast(ast_circuit, args)
+    obj = json.loads(data)
+    return from_json_obj(obj, args)
 
 
 def from_json_obj(
@@ -53,7 +55,7 @@ def from_ast(
             alias_keys={'R': 'resistance', 'C': 'capacitance'})
 
         neurons[ids_to_int[neuron_tok.value]] = Neuron(
-            params=NeuronParams(**n_params),
+            params=LIF(**n_params),
             synapses=_synapses_from_ast_synapses(
                 neuron_def.synapses, args, g_params, ids_to_int)
         )
@@ -62,6 +64,7 @@ def from_ast(
         outputs=[ids_to_int[o.value] for o in ast.outputs],
         inputs=[_synapses_from_ast_synapses(input, args, g_params, ids_to_int)
                 for input in ast.inputs],
+        inputs_id={},
         neurons=neurons,
         ids_to_int=ids_to_int)
 

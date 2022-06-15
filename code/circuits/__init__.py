@@ -1,8 +1,8 @@
-from .sncircuit import Neuron, SynapParams, SNCircuit, NeuronParams
+from .sncircuit import Neuron, SynapParams, SNCircuit, LIF
 from .load import from_json_path, from_json_str, from_json_obj
 
 __all__ = ['from_json_path', 'from_json_str', 'from_json_obj', 'Neuron', 'SNCircuit',
-           'NeuronParams']
+           'LIF']
 
 
 if __name__ == '__main__':
@@ -20,3 +20,5 @@ if __name__ == '__main__':
         .insert_input(pos=0, params={'e': SynapParams(weight=1.0, delay=1)})
 
     assert cycle_from_stop_circuit.same_as(cycle3_circuit)
+
+    ex_circuit = from_json_path('snn-circuits/json/clock-smallest.json', {'heartbeat': 1/256})
