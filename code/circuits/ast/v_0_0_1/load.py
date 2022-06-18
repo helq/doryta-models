@@ -61,7 +61,7 @@ def from_ast(
         )
 
     return SNCircuit(
-        outputs=[ids_to_int[o.value] for o in ast.outputs],
+        outputs=[frozenset({ids_to_int[o.value]}) for o in ast.outputs],
         inputs=[_synapses_from_ast_synapses(input, args, g_params, ids_to_int)
                 for input in ast.inputs],
         inputs_id={},

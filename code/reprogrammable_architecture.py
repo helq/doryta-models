@@ -127,7 +127,8 @@ def spikes_gate_model_1(
     input1_shift = andOr_act_shift + 2 * num_gates
     input2_shift = input1_shift + num_gates
     # the circuit has only one output
-    output_layer_shift = input2_shift + num_gates + aor_gate_act.outputs[0] * num_gates
+    out_0 = next(iter(aor_gate_act.outputs[0]))
+    output_layer_shift = input2_shift + num_gates + out_0 * num_gates
 
     spikes = {
         # Global parameters (pass_on for NOT gate, and reset params)
@@ -210,7 +211,8 @@ def spikes_gate_model_2(
         neuron_shift = andOr_circuit_shift + neu_num * num_gates
         print(f" Neuron '{neuron_name}': [{neuron_shift}, {neuron_shift + num_gates - 1}]")
     # layer 6.out_0
-    output_layer_shift = andOr_circuit_shift + aor_gate_act.outputs[0] * num_gates
+    out_0 = next(iter(aor_gate_act.outputs[0]))
+    output_layer_shift = andOr_circuit_shift + out_0 * num_gates
 
     n = num_gates
 

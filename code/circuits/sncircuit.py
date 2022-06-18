@@ -49,10 +49,11 @@ class SNCircuit(NamedTuple):
     their parent objects or children.
     """
     # TODO: change the type of all variables from mutable objects to immutable
-    outputs: list[int]
+    outputs: list[frozenset[int]]
     inputs: list[dict[int, SynapParams]]
-    inputs_id: dict[str, int]
     neurons: dict[int, Neuron]
+    # outputs_id: dict[str, int]
+    inputs_id: dict[str, int]
     ids_to_int: dict[str, int]
 
     def same_as(self, other: SNCircuit) -> bool:
@@ -107,13 +108,14 @@ class SNCircuit(NamedTuple):
             self.check_correct_output_id(output)
 
             # connecting neurons[outputs[output]] to inputs[input]
-            old_neuron = neurons[self.outputs[output]]
-            synapses = old_neuron.synapses.copy()
-            synapses.update(self.inputs[input])
-            neurons[self.outputs[output]] = Neuron(
-                params=old_neuron.params,
-                synapses=synapses
-            )
+            for out_id in self.outputs[output]:
+                old_neuron = neurons[out_id]
+                synapses = old_neuron.synapses.copy()
+                synapses.update(self.inputs[input])
+                neurons[out_id] = Neuron(
+                    params=old_neuron.params,
+                    synapses=synapses
+                )
 
         # removing connected outputs and inputs
         conn_outputs = set(out for out, in_ in out2in)
@@ -182,7 +184,7 @@ class SNCircuit(NamedTuple):
             if i not in conn_outputs_self
         ]
         outputs.extend(
-            out + shift_id_other
+            frozenset(out_id + shift_id_other for out_id in out)
             for i, out in enumerate(other.outputs)
             if i not in conn_outputs_other)
         inputs = [
@@ -216,17 +218,18 @@ class SNCircuit(NamedTuple):
             that.check_correct_input_id(input)
 
             # connecting self.outputs[self.outputs[output]] to other.inputs[input]
-            output_ = this.outputs[output] + shift_id_this
-            old_neuron = neurons[output_]
-            synapses = old_neuron.synapses.copy()
-            synapses.update({
-                i + shift_id_that: syn
-                for i, syn in that.inputs[input].items()
-            })
-            neurons[output_] = Neuron(
-                params=old_neuron.params,
-                synapses=synapses
-            )
+            for output_ in this.outputs[output]:
+                out_id = output_ + shift_id_this
+                old_neuron = neurons[out_id]
+                synapses = old_neuron.synapses.copy()
+                synapses.update({
+                    i + shift_id_that: syn
+                    for i, syn in that.inputs[input].items()
+                })
+                neurons[out_id] = Neuron(
+                    params=old_neuron.params,
+                    synapses=synapses
+                )
 
     def insert_input(self, pos: int, params: dict[str, SynapParams]) -> SNCircuit:
         inputs = self.inputs.copy()
@@ -262,14 +265,14 @@ class SNCreate:
         self.neuron_type = neuron_type
         self.neuron_params = neuron_params if neuron_params is not None else {}
         self.synapse_params = synapse_params if synapse_params is not None else {}
-        self._outputs: list[str] = []
+        self._outputs: list[frozenset[str]] = []
         self._inputs: dict[str, tuple[dict[str, SynapParams], list[str]]] = {}
         self._neurons: dict[str, tuple[NeuronType, dict[str, SynapParams]]] = {}
         # TODO: replace these _include variables for the circuits themselves. The current
         # strategy is simple to implement but wastes a lot of memory
         self._include_circuit_names: set[str] = set()
         self._include_inputs: dict[str, dict[str, SynapParams]] = {}
-        self._include_output_aliases: dict[str, str] = {}
+        self._include_output_aliases: dict[str, frozenset[str]] = {}
         self.__circuit: Optional[SNCircuit] = None
 
     def __enter__(self) -> SNCreate:
@@ -287,8 +290,11 @@ class SNCreate:
             raise AttributeError("SNCreate has to be closed to generate a `circuit`")
         return self.__circuit
 
-    def output(self, output: str) -> None:
-        self._outputs.append(output)
+    def output(self, output: str | Iterable[str]) -> None:
+        if isinstance(output, str):
+            self._outputs.append(frozenset({output}))
+        else:
+            self._outputs.append(frozenset(output))
 
     def input(self, name: str,
               synapses: Optional[dict[str, dict[str, Union[int, float]]]] = None,
@@ -350,7 +356,8 @@ class SNCreate:
 
         # for each output, an alias is generated (out_X)
         for i, out in enumerate(circuit.outputs):
-            self._include_output_aliases[f"{name}.out_{i}"] = f"{name}.{ints_to_id[out]}"
+            self._include_output_aliases[f"{name}.out_{i}"] = frozenset(
+                f"{name}.{ints_to_id[out_id]}" for out_id in out)
 
         # inputs from the included circuit. Does not polute variable `_inputs`
         inputs_int_to_id = {i: id for id, i in circuit.inputs_id.items()}
@@ -377,14 +384,30 @@ class SNCreate:
         if not_in_neurons:
             raise Exception(f"{name} {not_in_neurons} are not neurons")
 
+    def _out_ids_to_out_ints(
+        self, ids_to_int: dict[str, int], out_set: frozenset[str]
+    ) -> frozenset[int]:
+        to_ret = set()
+        for out_id in out_set:
+            # out_id is a neuron
+            if out_id in ids_to_int:
+                to_ret.add(ids_to_int[out_id])
+                continue
+            # out_id is an output from an `include`
+            for id_ in self._include_output_aliases[out_id]:
+                if id_ not in ids_to_int:
+                    raise ValueError(f"Neuron `{id_}` couldn't be found")
+                to_ret.add(ids_to_int[id_])
+        return frozenset(to_ret)
+
     def generate(self) -> SNCircuit:
-        self._check_iter_is_contained_in_neurons("Outputs", self._outputs, True)
+        self._check_iter_is_contained_in_neurons(
+            "Outputs", [out for out_s in self._outputs for out in out_s], True)
 
         ids_to_int = {id: i for i, id in enumerate(self._neurons)}
         inputs_id = {id: i for i, id in enumerate(self._inputs)}
-        outputs = [ids_to_int[id] if id in ids_to_int
-                   else ids_to_int[self._include_output_aliases[id]]
-                   for id in self._outputs]
+        outputs = [self._out_ids_to_out_ints(ids_to_int, out_s)
+                   for out_s in self._outputs]
 
         inputs = []
         for inp, (synapses, inputs_to_inp) in self._inputs.items():
