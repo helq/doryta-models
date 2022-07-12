@@ -396,7 +396,7 @@ class SNCreate:
             # out_id is an output from an `include`
             for id_ in self._include_output_aliases[out_id]:
                 if id_ not in ids_to_int:
-                    raise ValueError(f"Neuron `{id_}` couldn't be found")
+                    raise Exception(f"Neuron `{id_}` couldn't be found")
                 to_ret.add(ids_to_int[id_])
         return frozenset(to_ret)
 

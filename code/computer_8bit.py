@@ -4,7 +4,7 @@ import pathlib
 
 import numpy as np
 
-from .doryta_io.model_saver import ModelSaverLayers
+from .doryta_io.circuit_saver import save
 from .doryta_io.spikes import save_spikes_for_doryta
 from .circuits.prelude.base import byte_latch
 
@@ -12,18 +12,9 @@ if __name__ == '__main__':
     dump_folder = pathlib.Path('snn-circuits/')
     heartbeat = 1/8
 
-    msaver = ModelSaverLayers(dt=heartbeat)
-    # Layer 0: activate and reset
-    msaver.add_neuron_group(thresholds=np.array([0.8, 0.8]), partitions=2)
-    # Layer 1: set 0-7 bits
-    msaver.add_neuron_group(thresholds=np.array(np.ones(8) * 0.8), partitions=8)
-
-    input_layers: list[tuple[int, int] | int]
-    input_layers = [(0, 0), (0, 1)] + [(1, i) for i in range(8)]  # type: ignore
-
     byte_latch_ = byte_latch(heartbeat)
-    msaver.add_sncircuit_layer(byte_latch_, input_layers)
-    msaver.save(dump_folder / 'snn-models' / 'byte_latch.doryta.bin')
+    save(byte_latch_, dump_folder / 'snn-models' / 'byte_latch.doryta.bin',
+         heartbeat=heartbeat, verbose=True)
 
     # Generating spikes
     spikes = {
@@ -32,14 +23,14 @@ if __name__ == '__main__':
         # reset
         1: np.array([3]),
         # set 0-7 bits
-        2: np.array([1]),
-        3: np.array([]),
-        4: np.array([1]),
-        5: np.array([1]),
-        6: np.array([]),
-        7: np.array([]),
-        8: np.array([]),
-        9: np.array([]),
+        2: np.array([1]),  # bit 0
+        3: np.array([]),   # bit 1
+        4: np.array([1]),  # bit 2
+        5: np.array([1]),  # bit 3
+        6: np.array([]),   # bit 4
+        7: np.array([]),   # bit 5
+        8: np.array([]),   # bit 6
+        9: np.array([]),   # bit 7
     }
 
     save_spikes_for_doryta(
@@ -47,6 +38,3 @@ if __name__ == '__main__':
         dump_folder / 'spikes' / 'byte_latch',
         additional_spikes=spikes
     )
-
-    print("Output neurons are:", [10 + i for out in byte_latch_.outputs
-                                  for i in out])
