@@ -35,9 +35,8 @@ if False and __name__ == '__main__':
     }
 
     save_spikes_for_doryta(
-        None, None,
         dump_folder / 'spikes' / 'byte_latch',
-        additional_spikes=spikes
+        individual_spikes=spikes
     )
 
 if True and __name__ == '__main__':
@@ -69,7 +68,6 @@ if True and __name__ == '__main__':
     }
 
     save_spikes_for_doryta(
-        None, None,
         dump_folder / 'spikes' / 'two_bytes_RAM',
-        additional_spikes=spikes
+        individual_spikes=spikes
     )

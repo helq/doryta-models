@@ -35,9 +35,9 @@ def img_to_tempencoding(
     times = np.concatenate([times + i for i in range(total_images)])
 
     trigger_times = times[np.arange(n_gray-1, spikes.shape[0], n_gray)]
-    additional_spikes = {
+    individual_spikes = {
         position_trigger_neuron: trigger_times
     }
-    assert len(additional_spikes[position_trigger_neuron]) == total_images
+    assert len(individual_spikes[position_trigger_neuron]) == total_images
 
-    return spikes, times, additional_spikes
+    return spikes, times, individual_spikes

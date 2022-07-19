@@ -42,30 +42,34 @@ if __name__ == '__main__':
 if False and __name__ == '__main__':
     times = np.array([0.6])
 
-    save_spikes_for_doryta(insert_pattern(np.array(
-        [[0, 0, 1],
-         [1, 0, 1],
-         [0, 1, 1]]
-    )), times, path / "20x20/gol-glider")
+    save_spikes_for_doryta(
+        path / "20x20/gol-glider",
+        insert_pattern(np.array(
+            [[0, 0, 1],
+             [1, 0, 1],
+             [0, 1, 1]])),
+        times)
 
-    save_spikes_for_doryta(insert_pattern(np.array(
-        [[1, 1],
-         [1, 1]]
-    )), times, path / "20x20/gol-block")
+    save_spikes_for_doryta(
+        path / "20x20/gol-block",
+        insert_pattern(np.array(
+            [[1, 1],
+             [1, 1]]
+        )), times,)
 
-    save_spikes_for_doryta(insert_pattern(np.array(
-        [[1, 1, 1]]
-    )), times, path / "20x20/gol-blinker")
+    save_spikes_for_doryta(path / "20x20/gol-blinker",
+                           insert_pattern(np.array([[1, 1, 1]])), times)
 
-    save_spikes_for_doryta(insert_pattern(die_hard), times, path / "20x20/gol-die-hard")
+    save_spikes_for_doryta(path / "20x20/gol-die-hard", insert_pattern(die_hard), times)
 
     # Saving random GoL 20x20 to tar.zst
     os.makedirs(path / "20x20/gol-random")
     np.random.seed(3287592)
     for i in range(1000):
         save_spikes_for_doryta(
+            path / f"20x20/gol-random/gol-random-{i:04}",
             (np.random.rand(1, 400) < .2).astype(int),
-            times, path / f"20x20/gol-random/gol-random-{i:04}")
+            times)
 
     with tarfile.open(path / "20x20/gol-random.tar.xz", "w:xz") as tar:
         tar.add(path / '20x20/gol-random/')
@@ -80,11 +84,13 @@ if True and __name__ == '__main__':
     seed = 3287590
     np.random.seed(seed)
     save_spikes_for_doryta(
+        path / f"100x100/gol-random-{seed}",
         (np.random.rand(1, 100*100) < .2).astype(int),
-        times, path / f"100x100/gol-random-{seed}")
+        times)
 
-    save_spikes_for_doryta(insert_pattern(die_hard, width=100, height=100),
-                           times, path / "100x100/gol-die-hard")
+    save_spikes_for_doryta(path / "100x100/gol-die-hard",
+                           insert_pattern(die_hard, width=100, height=100),
+                           times)
 
 
 # 1000 x 1000 grid
@@ -92,18 +98,21 @@ if False and __name__ == '__main__':
     times = np.array([0.6])
 
     save_spikes_for_doryta(
+        path / "1000x1000/gol-glider",
         insert_pattern(np.array(
             [[0, 0, 1],
              [1, 0, 1],
              [0, 1, 1]]
         ), width=1000, height=1000),
-        times, "path / 1000x1000/gol-glider")
+        times)
 
-    save_spikes_for_doryta(insert_pattern(die_hard, width=1000, height=1000),
-                           times, path / "1000x1000/gol-die-hard")
+    save_spikes_for_doryta(path / "1000x1000/gol-die-hard",
+                           insert_pattern(die_hard, width=1000, height=1000),
+                           times)
 
     seed = 3287591
     np.random.seed(seed)
     save_spikes_for_doryta(
+        path / f"1000x1000/gol-random-{seed}",
         (np.random.rand(1, 1000*1000) < .2).astype(int),
-        times, f"path / 1000x1000/gol-random-{seed}")
+        times)

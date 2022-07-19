@@ -377,7 +377,7 @@ if __name__ == '__main__':  # noqa: C901
         cuts = [.01, 0.2, 0.3, 0.4, 0.5]
         # cuts = [.5]  # This should coincide with Keras output
 
-        spikes, times, additional_spikes = img_to_tempencoding(
+        spikes, times, individual_spikes = img_to_tempencoding(
             x_test[interval], cuts,
             position_trigger_neuron=28 * 28 + 256 + 64 + 100)
 
@@ -400,7 +400,7 @@ if __name__ == '__main__':  # noqa: C901
                    f"interval-{interval.start}-to-{interval.stop - 1}-" \
                    f"grayscale=[{','.join(str(c) for c in cuts)}]"
 
-        save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
+        save_spikes_for_doryta(spikes, times, path, individual_spikes=individual_spikes)
         save_tags_for_doryta(y_test[interval], path)
 
         print("Classes of images:", klass)

@@ -268,9 +268,8 @@ if __name__ == '__main__':
         # ====== Saving spikes ======
         spikes, output_layer_shift = spikes_gate_model_1(num_gates, aor_gate_act)
         save_spikes_for_doryta(
-            None, None,
             dump_folder / 'spikes' / f'reconfigurable-gate-model-v1-test1-gates={num_gates}',
-            additional_spikes=spikes
+            individual_spikes=spikes
         )
 
         print("The output gate neurons reside on range "
@@ -290,9 +289,8 @@ if __name__ == '__main__':
         spikes, output_layer_shift = \
             spikes_gate_model_2(num_gates, aor_gate_act, gate_keeper_circuit)
         save_spikes_for_doryta(
-            None, None,
             dump_folder / 'spikes' / f'reconfigurable-gate-model-v2-test1-gates={num_gates}',
-            additional_spikes=spikes
+            individual_spikes=spikes
         )
 
         print("The output gate neurons reside on range "

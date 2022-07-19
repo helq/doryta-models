@@ -232,7 +232,7 @@ if __name__ == '__main__':  # noqa: C901
         else:
             trigger_neuron = 8968
 
-        spikes, times, additional_spikes = img_to_tempencoding(
+        spikes, times, individual_spikes = img_to_tempencoding(
             x_test[interval].reshape((-1, 28 * 28)), cuts,
             position_trigger_neuron=trigger_neuron)
 
@@ -244,7 +244,7 @@ if __name__ == '__main__':  # noqa: C901
             f"interval-{interval.start}-to-{interval.stop - 1}-" \
             f"grayscale=[{','.join(str(c) for c in cuts)}]"
 
-        save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
+        save_spikes_for_doryta(path, spikes, times, individual_spikes=individual_spikes)
         save_tags_for_doryta(y_test[interval], path)
 
         print("Classes of images:", klass)
@@ -259,7 +259,7 @@ if __name__ == '__main__':  # noqa: C901
         else:
             trigger_neuron = 8968
 
-        spikes, times, additional_spikes = img_to_tempencoding(
+        spikes, times, individual_spikes = img_to_tempencoding(
             x_test.reshape((-1, 28 * 28)), cuts,
             position_trigger_neuron=trigger_neuron)
 
@@ -270,7 +270,7 @@ if __name__ == '__main__':  # noqa: C901
             f"spikified-images-all-" \
             f"grayscale=[{','.join(str(c) for c in cuts)}]"
 
-        save_spikes_for_doryta(spikes, times, path, additional_spikes=additional_spikes)
+        save_spikes_for_doryta(path, spikes, times, individual_spikes=individual_spikes)
         save_tags_for_doryta(y_test, path)
 
         print("Classes of images:", klass)
