@@ -267,7 +267,7 @@ class SNCreate:
         self.synapse_params = synapse_params if synapse_params is not None else {}
         self._outputs: list[frozenset[str]] = []
         self._inputs: dict[str, tuple[dict[str, SynapParams], list[str]]] = {}
-        self._neurons: dict[str, tuple[NeuronType, dict[str, SynapParams]]] = {}
+        self._neurons: dict[str, tuple[NeuronType, dict[str, SynapParams], frozenset[str]]] = {}
         # TODO: replace these _include variables for the circuits themselves. The current
         # strategy is simple to implement but wastes a lot of memory
         self._include_circuit_names: set[str] = set()
@@ -297,7 +297,7 @@ class SNCreate:
             self._outputs.append(frozenset(output))
 
     def input(self, name: str,
-              synapses: Optional[dict[str, dict[str, Union[int, float]]]] = None,
+              synapses: Optional[dict[str, dict[str, int | float]] | set[str]] = None,
               inputs: Optional[Iterable[str]] = None) -> None:
 
         # TODO: check that input does not follow the convention `out_X` or `in_X`, those
@@ -305,6 +305,8 @@ class SNCreate:
 
         if inputs is None and synapses is None:
             raise ValueError("Both `synapses` and `inputs` cannot be None at the same time")
+        if isinstance(synapses, set):
+            synapses = {n: {} for n in synapses}
         match = token_re.fullmatch(name)
         if match is None:
             raise ValueError(f"`{name}` is not a valid input name")
@@ -322,7 +324,9 @@ class SNCreate:
 
     def neuron(self, name: str,
                params: Optional[dict[str, Union[int, float]]] = None,
-               synapses: Optional[dict[str, dict[str, Union[int, float]]]] = None) -> None:
+               synapses: Optional[dict[str, dict[str, int | float]]] = None,
+               to_inputs: Optional[Iterable[str]] = None
+               ) -> None:
 
         # TODO: check that input does not follow the convention `out_X` or `in_X`, those
         # are reserved tokens
@@ -342,7 +346,9 @@ class SNCreate:
                 assert 'delay' in syn_params and isinstance(syn_params['delay'], int)
                 neuron_synapses[neu_id] = SynapParams(**syn_params)  # type: ignore
 
-        self._neurons[name] = (neuron_, neuron_synapses)
+        to_inputs = frozenset() if to_inputs is None else frozenset(to_inputs)
+
+        self._neurons[name] = (neuron_, neuron_synapses, to_inputs)
 
     def include(self, name: str, circuit: SNCircuit) -> None:
         match = circuit_re.fullmatch(name)
@@ -371,7 +377,7 @@ class SNCreate:
             self._neurons[f"{name}.{ints_to_id[neu_i]}"] = (neu.params, {
                 f"{name}.{ints_to_id[i]}": syn_params
                 for i, syn_params in neu.synapses.items()
-            })
+            }, frozenset())
 
     def _check_iter_is_contained_in_neurons(
         self, name: str, iter: Iterable[str],
@@ -425,12 +431,17 @@ class SNCreate:
             inputs.append(synapses_input)
 
         neurons = {}
-        for neu_id, (neu_params, synapses) in self._neurons.items():
+        for neu_id, (neu_params, synapses, to_inputs) in self._neurons.items():
             self._check_iter_is_contained_in_neurons(f"Neuron `{neu_id}` synapses", synapses)
-            neurons[ids_to_int[neu_id]] = Neuron(
-                params=neu_params,
-                synapses={ids_to_int[n_id]: synap_params
-                          for n_id, synap_params in synapses.items()})
+            n_synapses = {ids_to_int[n_id]: synap_params
+                          for n_id, synap_params in synapses.items()}
+            for input in to_inputs:
+                if input not in self._include_inputs:
+                    raise Exception(f"Input `{input}` cannot be found")
+                # TODO: see above
+                n_synapses |= {ids_to_int[neu_id]: synap_params
+                               for neu_id, synap_params in self._include_inputs[input].items()}
+            neurons[ids_to_int[neu_id]] = Neuron(params=neu_params, synapses=n_synapses)
 
         self.__circuit = SNCircuit(outputs=outputs, inputs=inputs, inputs_id=inputs_id,
                                    neurons=neurons, ids_to_int=ids_to_int)
