@@ -324,7 +324,7 @@ class SNCreate:
 
     def neuron(self, name: str,
                params: Optional[dict[str, Union[int, float]]] = None,
-               synapses: Optional[dict[str, dict[str, int | float]]] = None,
+               synapses: Optional[dict[str, dict[str, int | float]] | set[str]] = None,
                to_inputs: Optional[Iterable[str]] = None
                ) -> None:
 
@@ -334,6 +334,8 @@ class SNCreate:
         match = token_re.fullmatch(name)
         if match is None:
             raise ValueError(f"`{name}` is not a valid neuron name")
+        if isinstance(synapses, set):
+            synapses = {s: {} for s in synapses}
 
         neuron_params = self.neuron_params if params is None \
             else self.neuron_params | params
