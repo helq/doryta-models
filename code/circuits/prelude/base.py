@@ -30,15 +30,8 @@ def asr_latch(heartbeat: float) -> SNCircuit:
 def byte_latch(heartbeat: float) -> SNCircuit:
     with SNCreate(
         neuron_type=LIF,
-        neuron_params={
-            "resistance": 1.0,
-            "capacitance": heartbeat,
-            "threshold": 0.8
-        },
-        synapse_params={
-            "weight": 0.5,
-            "delay": 1
-        }
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 0.5, "delay": 1}
     ) as snc:
         for i in range(8):
             snc.output(f"Latch_{i}.out_0")
@@ -56,15 +49,8 @@ def byte_latch(heartbeat: float) -> SNCircuit:
 def two_bytes_RAM(heartbeat: float) -> SNCircuit:
     with SNCreate(
         neuron_type=LIF,
-        neuron_params={
-            "resistance": 1.0,
-            "capacitance": heartbeat,
-            "threshold": 0.8
-        },
-        synapse_params={
-            "weight": 0.5,
-            "delay": 1
-        }
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 0.5, "delay": 1}
     ) as snc:
         for i in range(8):
             snc.output({f"Byte_0.out_{i}", f"Byte_1.out_{i}"})
@@ -127,15 +113,8 @@ def RAM(heartbeat: float, depth: int = 1) -> SNCircuit:  # noqa: C901
 
     with SNCreate(
         neuron_type=LIF,
-        neuron_params={
-            "resistance": 1.0,
-            "capacitance": heartbeat,
-            "threshold": 0.8
-        },
-        synapse_params={
-            "weight": 0.5,
-            "delay": 1
-        }
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 0.5, "delay": 1}
     ) as snc:
         # ### Defining the output. Each output bit aggregates `2**depth` bits output
         #     (connections)
@@ -174,8 +153,117 @@ def RAM(heartbeat: float, depth: int = 1) -> SNCircuit:  # noqa: C901
     return snc.circuit
 
 
+def half_adder(heartbeat: float) -> SNCircuit:
+    """
+    SNCircuit with two inputs (two bits), and two outputs (addition and carry bits).
+    """
+    inf = 2e20
+    with SNCreate(
+        neuron_type=LIF,
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 0.5, "delay": 1}
+    ) as snc:
+        snc.output("xor")
+        snc.output("and")
+        snc.input("bit-0", synapses={"or": {"weight": 1.0}, "mem": {}})
+        snc.input("bit-1", synapses={"or": {"weight": 1.0}, "mem": {}})
+        snc.neuron("or", synapses={"mem": {}, "and": {}, "xor": {"delay": 2}})
+        snc.neuron("mem", params={"resistance": inf}, synapses={"and", "xor"})
+        snc.neuron("and", synapses={"mem"})
+        snc.neuron("xor")
+    return snc.circuit
+
+
+def full_adder(heartbeat: float) -> SNCircuit:
+    """
+    SNCircuit with three inputs (three bits), and two outputs (addition and carry bits).
+    """
+    inf = 2e20
+    with SNCreate(
+        neuron_type=LIF,
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 0.5, "delay": 1}
+    ) as snc:
+        snc.output({"xor-1", "xor-2"})
+        snc.output("and")
+        input_bit_synapses: dict[str, dict[str, int | float]] \
+            = {"or": {"weight": 1.0}, "mem": {}, "xor-2": {"weight": 0.3, "delay": 3}}
+        snc.input("bit-0", synapses=input_bit_synapses)
+        snc.input("bit-1", synapses=input_bit_synapses)
+        snc.input("bit-2", synapses=input_bit_synapses)
+        snc.neuron("or", synapses={"mem": {}, "and": {}, "xor-1": {"delay": 2}})
+        snc.neuron("mem", params={"resistance": inf}, synapses={"and", "xor-1"})
+        snc.neuron("and", synapses={"mem"})
+        snc.neuron("xor-1")
+        snc.neuron("xor-2")
+    return snc.circuit
+
+
+def two_bit_adder(heartbeat: float) -> SNCircuit:
+    with SNCreate(
+        neuron_type=LIF,
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 1.0, "delay": 1}
+    ) as snc:
+        half = half_adder(heartbeat)
+        full = full_adder(heartbeat)
+        snc.output("Half.out_0")
+        snc.output("Full_1.out_0")
+        snc.output("Full_1.out_1")
+
+        snc.input("in0-0", inputs=['Half.bit-0'])
+        snc.input("in0-1", synapses={'to-full_1-1': {'delay': 2}})
+        snc.input("in1-0", inputs=['Half.bit-1'])
+        snc.input("in1-1", synapses={'to-full_1-2': {'delay': 2}})
+        snc.connection('Half.out_1', 'Full_1.bit-0')
+        # TODO: get rid of these extra neurons, it should be possible to modify the inputs
+        snc.neuron('to-full_1-1', to_inputs={'Full_1.bit-1'})
+        snc.neuron('to-full_1-2', to_inputs={'Full_1.bit-2'})
+
+        snc.include("Half", half)
+        snc.include("Full_1", full)
+    return snc.circuit
+
+
+def multi_bit_adder(heartbeat: float, n_bits: int) -> SNCircuit:
+    with SNCreate(
+        neuron_type=LIF,
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 1.0, "delay": 1}
+    ) as snc:
+        half = half_adder(heartbeat)
+        full = full_adder(heartbeat)
+        snc.output("Half.out_0")
+        for b in range(1, n_bits):
+            snc.output(f"Full_{b}.out_0")
+        snc.output(f"Full_{n_bits-1}.out_1")
+
+        snc.input("in0-0", inputs=['Half.bit-0'])
+        for b in range(1, n_bits):
+            snc.input(f"in0-{b}", synapses={f'to-full_{b}-1': {'delay': b * 2}})
+        snc.input("in1-0", inputs=['Half.bit-1'])
+        for b in range(1, n_bits):
+            snc.input(f"in1-{b}", synapses={f'to-full_{b}-2': {'delay': b * 2}})
+
+        if n_bits > 1:
+            snc.connection('Half.out_1', 'Full_1.bit-0')
+        for b in range(2, n_bits):
+            snc.connection(f'Full_{b-1}.out_1', f'Full_{b}.bit-0')
+
+        # TODO: get rid of these extra neurons, it should be possible to modify the inputs
+        for b in range(1, n_bits):
+            snc.neuron(f'to-full_{b}-1', to_inputs={f'Full_{b}.bit-1'})
+            snc.neuron(f'to-full_{b}-2', to_inputs={f'Full_{b}.bit-2'})
+
+        snc.include("Half", half)
+        for b in range(1, n_bits):
+            snc.include(f"Full_{b}", full)
+    return snc.circuit
+
+
 if __name__ == '__main__':
     asr_latch_test = asr_latch(1/256)
     byte_latch_test = byte_latch(1/256)
     two_bytes_RAM_test = two_bytes_RAM(1/256)
     RAM_16_bytes_test = RAM(1/256, 4)
+    two_bit_adder_test = multi_bit_adder(1/256, 2)

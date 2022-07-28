@@ -12,8 +12,8 @@ from types import TracebackType
 from typing import NamedTuple, Optional, Any, Union
 from collections.abc import Iterable, Container
 
-token_re = re.compile(r'[a-z][a-zA-Z0-9/_-]*')
-circuit_re = re.compile(r'[A-Z][a-zA-Z0-9/_-]*')
+token_re = re.compile(r'[a-z/_+-][a-zA-Z0-9/_+-]*')
+circuit_re = re.compile(r'[A-Z][a-zA-Z0-9/_+-]*')
 
 
 class LIF(NamedTuple):
@@ -268,6 +268,8 @@ class SNCreate:
         self._outputs: list[frozenset[str]] = []
         self._inputs: dict[str, tuple[dict[str, SynapParams], list[str]]] = {}
         self._neurons: dict[str, tuple[NeuronType, dict[str, SynapParams], frozenset[str]]] = {}
+        self._connections: dict[str, list[tuple[str, Optional[SynapParams]]]] = {}
+        self.__connections: dict[str, dict[str, SynapParams]] = {}
         # TODO: replace these _include variables for the circuits themselves. The current
         # strategy is simple to implement but wastes a lot of memory
         self._include_circuit_names: set[str] = set()
@@ -381,14 +383,31 @@ class SNCreate:
                 for i, syn_params in neu.synapses.items()
             }, frozenset())
 
+    def connection(
+        self, from_: str, to: str,
+        synapse_params: Optional[dict[str, Union[int, float]]] = None
+    ) -> None:
+        val: tuple[str, Optional[SynapParams]] = (to, None)
+        if synapse_params is not None:
+            syn_params = self.synapse_params | synapse_params
+            assert 'delay' in syn_params and isinstance(syn_params['delay'], int)
+            val = (to, SynapParams(**syn_params))  # type: ignore
+        if from_ not in self._connections:
+            self._connections[from_] = []
+        self._connections[from_].append(val)
+
     def _check_iter_is_contained_in_neurons(
         self, name: str, iter: Iterable[str],
-        include_output_aliases: bool = False
+        consider_output_aliases: bool = False,
+        consider_input_aliases: bool = False,
     ) -> None:
         not_in_neurons = set(v for v in iter if v not in self._neurons)
-        if include_output_aliases:
+        if consider_output_aliases:
             not_in_neurons = set(v for v in not_in_neurons
                                  if v not in self._include_output_aliases)
+        if consider_input_aliases:
+            not_in_neurons = set(v for v in not_in_neurons
+                                 if v not in self._include_inputs)
         if not_in_neurons:
             raise Exception(f"{name} {not_in_neurons} are not neurons")
 
@@ -408,9 +427,55 @@ class SNCreate:
                 to_ret.add(ids_to_int[id_])
         return frozenset(to_ret)
 
+    def _check_additional_connections_and_simplify(self) -> None:  # noqa: C901
+        """
+        Checks that all additional connections are possible and dissentangles all
+        `from_` outputs (groups of neurons) into only neurons, and `to`s into neurons.
+        This way, neurons `_connections` can be cleanely used by the generator function
+        and no need for more fancy complex coding.
+
+        Yes, this function its too complex according to flake8, but it's just because of
+        all the loops. Totally necessary loops btw
+        """
+        simp_connections: dict[frozenset[str], dict[str, SynapParams]] = {}
+        for from_, to_conns in self._connections.items():
+            if from_ in self._include_output_aliases:
+                from_list = self._include_output_aliases[from_]
+            elif from_ in self._neurons:
+                from_list = frozenset({from_})
+            else:
+                raise Exception(f"Neuron/output `{from_}` couldn't be found")
+
+            simp_connections[from_list] = {}
+            for to, params in to_conns:
+                if params is None:
+                    if to in self._include_inputs:
+                        simp_connections[from_list] |= self._include_inputs[to].items()
+                    elif to in self._neurons:
+                        raise Exception(f"`{to}` should be an input because no synapse "
+                                        "parameters were given but it's a neuron")
+                    else:
+                        raise Exception(f"Input `{to}` couldn't be found")
+                else:
+                    if to in self._neurons:
+                        simp_connections[from_list][to] = params
+                    elif to in self._include_inputs:
+                        raise Exception(f"`{to}` should be a neuron because synapse parameters "
+                                        "were defined for it but it's an input")
+                    else:
+                        raise Exception(f"Neuron `{to}` couldn't be found")
+
+        for from_list, conns in simp_connections.items():
+            for from_ in from_list:
+                if from_ in self.__connections:
+                    self.__connections[from_] |= dict(conns)
+                else:
+                    self.__connections[from_] = conns
+
     def generate(self) -> SNCircuit:
         self._check_iter_is_contained_in_neurons(
             "Outputs", [out for out_s in self._outputs for out in out_s], True)
+        self._check_additional_connections_and_simplify()
 
         ids_to_int = {id: i for i, id in enumerate(self._neurons)}
         inputs_id = {id: i for i, id in enumerate(self._inputs)}
@@ -435,6 +500,9 @@ class SNCreate:
         neurons = {}
         for neu_id, (neu_params, synapses, to_inputs) in self._neurons.items():
             self._check_iter_is_contained_in_neurons(f"Neuron `{neu_id}` synapses", synapses)
+            # Adding new synapses from connections defined before
+            if neu_id in self.__connections:
+                synapses |= self.__connections[neu_id]
             n_synapses = {ids_to_int[n_id]: synap_params
                           for n_id, synap_params in synapses.items()}
             for input in to_inputs:
