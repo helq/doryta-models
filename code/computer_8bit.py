@@ -7,9 +7,10 @@ import numpy as np
 from .doryta_io.circuit_saver import save
 from .doryta_io.spikes import save_spikes_for_doryta
 from .circuits.prelude.base import byte_latch, two_bytes_RAM, RAM, half_adder, \
-    full_adder, multi_bit_adder
+    full_adder, multi_bit_adder, counter_register
 
 dump_folder = pathlib.Path('snn-circuits/')
+
 
 # One byte memory
 if False and __name__ == '__main__':
@@ -40,6 +41,7 @@ if False and __name__ == '__main__':
         dump_folder / 'spikes' / 'byte_latch',
         individual_spikes=spikes
     )
+
 
 # Two bytes RAM
 if False and __name__ == '__main__':
@@ -228,7 +230,7 @@ if False and __name__ == '__main__':
 
 
 # Testing byte adder
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     heartbeat = 1/100
 
     # test with:
@@ -251,26 +253,66 @@ if True and __name__ == '__main__':
     # 6        00000111 00000001     000001000
     # 7        01111111 00000001     010000000
     # 8        11111111 00000001     100000000
+    # 9        11111111 11111111     111111110
     spikes = {
         # input bits (first number)
-        0: np.array([1, 4, 5, 6, 7, 8]),
-        1: np.array([2, 3, 5, 6, 7, 8]),
-        2: np.array([6, 7, 8]),
-        3: np.array([7, 8]),
-        4: np.array([7, 8]),
-        5: np.array([7, 8]),
-        6: np.array([7, 8]),
-        7: np.array([8]),
+        0: np.array([1, 4, 5, 6, 7, 8, 9]),
+        1: np.array([2, 3, 5, 6, 7, 8, 9]),
+        2: np.array([6, 7, 8, 9]),
+        3: np.array([7, 8, 9]),
+        4: np.array([7, 8, 9]),
+        5: np.array([7, 8, 9]),
+        6: np.array([7, 8, 9]),
+        7: np.array([8, 9]),
         # input bits (second number)
-        8: np.array([1, 2, 3, 4, 5, 6, 7, 8]),
-        9: np.array([3, 4, 5]),
-        10: np.array([]),
-        11: np.array([]),
-        12: np.array([]),
-        13: np.array([]),
-        14: np.array([]),
-        15: np.array([]),
+        8: np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+        9: np.array([3, 4, 5, 9]),
+        10: np.array([9]),
+        11: np.array([9]),
+        12: np.array([9]),
+        13: np.array([9]),
+        14: np.array([9]),
+        15: np.array([9]),
     }
 
     save_spikes_for_doryta(dump_folder / 'spikes' / 'byte_adder',
                            individual_spikes=spikes)
+
+
+# One byte memory
+if True and __name__ == '__main__':
+    heartbeat = 1/100
+
+    # test with:
+    # > src/doryta \
+    # > --load-model=../data/models/snn-circuits/snn-models/counter_register.doryta.bin \
+    # > --load-spikes=../data/models/snn-circuits/spikes/counter_register.bin --probe-firing \
+    # > --output-dir=testing-8-bit/counter_register --save-state --end=10
+
+    save(counter_register(heartbeat),
+         dump_folder / 'snn-models' / 'counter_register.doryta.bin',
+         heartbeat=heartbeat, verbose=True)
+
+    # Generating spikes
+    spikes = {
+        # read
+        0: np.array([4, 9]),
+        # reset
+        1: np.array([5]),
+        # set 0-7 bits
+        2: np.array([1]),  # bit 0
+        3: np.array([]),   # bit 1
+        4: np.array([1]),  # bit 2
+        5: np.array([1]),  # bit 3
+        6: np.array([]),   # bit 4
+        7: np.array([]),   # bit 5
+        8: np.array([]),   # bit 6
+        9: np.array([]),   # bit 7
+        # count up
+        10: np.array([2, 3, 6, 7, 8]),
+    }
+
+    save_spikes_for_doryta(
+        dump_folder / 'spikes' / 'counter_register',
+        individual_spikes=spikes
+    )

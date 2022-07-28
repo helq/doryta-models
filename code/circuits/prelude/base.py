@@ -27,23 +27,28 @@ def asr_latch(heartbeat: float) -> SNCircuit:
     return snc.circuit
 
 
-def byte_latch(heartbeat: float) -> SNCircuit:
+def multi_latch(heartbeat: float, n_bits: int = 8) -> SNCircuit:
+    assert n_bits > 1
     with SNCreate(
         neuron_type=LIF,
         neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
         synapse_params={"weight": 0.5, "delay": 1}
     ) as snc:
-        for i in range(8):
+        asr_latch_val = asr_latch(heartbeat)
+        for i in range(n_bits):
             snc.output(f"Latch_{i}.out_0")
 
-        snc.input("read", inputs=[f"Latch_{i}.activate" for i in range(8)])
-        snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(8)])
-        for i in range(8):
+        snc.input("read", inputs=[f"Latch_{i}.activate" for i in range(n_bits)])
+        snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(n_bits)])
+        for i in range(n_bits):
             snc.input(f"set_{i}", inputs=[f"Latch_{i}.set"])
 
-        for i in range(8):
-            snc.include(f"Latch_{i}", asr_latch(heartbeat))
+        for i in range(n_bits):
+            snc.include(f"Latch_{i}", asr_latch_val)
     return snc.circuit
+
+
+byte_latch = multi_latch
 
 
 def two_bytes_RAM(heartbeat: float) -> SNCircuit:
@@ -226,6 +231,7 @@ def two_bit_adder(heartbeat: float) -> SNCircuit:
 
 
 def multi_bit_adder(heartbeat: float, n_bits: int) -> SNCircuit:
+    assert n_bits > 0
     with SNCreate(
         neuron_type=LIF,
         neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
@@ -258,6 +264,42 @@ def multi_bit_adder(heartbeat: float, n_bits: int) -> SNCircuit:
         snc.include("Half", half)
         for b in range(1, n_bits):
             snc.include(f"Full_{b}", full)
+    return snc.circuit
+
+
+def counter_register(heartbeat: float, n_bits: int = 8) -> SNCircuit:
+    assert n_bits > 1
+    """
+    This is a byte latch with extra functionality, triggering `counter-up` will make the
+    internal value of the register go up one bit.
+    """
+    asr_latch_val = asr_latch(heartbeat)
+    with SNCreate(
+        neuron_type=LIF,
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 0.5, "delay": 1}
+    ) as snc:
+        for i in range(n_bits):
+            snc.output(f"Latch_{i}.out_0")
+
+        snc.input("read", inputs=[f"Latch_{i}.activate" for i in range(n_bits)])
+        snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(n_bits)])
+        for i in range(n_bits):
+            snc.input(f"set_{i}", inputs=[f"Latch_{i}.set"])
+        snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(n_bits)])
+        snc.input("count-up", synapses={'Latch_0.memory': {},
+                                        'count-up-1': {'delay': 2}})
+
+        if n_bits > 1:
+            snc.connection('Latch_0.memory', 'count-up-1', synapse_params={})
+            snc.neuron(f'count-up-{n_bits-1}', synapses={f'Latch_{n_bits-1}.memory'})
+        for i in range(1, n_bits-1):
+            snc.neuron(f'count-up-{i}', synapses={
+                f'Latch_{i}.memory': {}, f'count-up-{i}': {'delay': 2}})
+            snc.connection(f'Latch_{i}.memory', f'count-up-{i+1}', synapse_params={})
+
+        for i in range(n_bits):
+            snc.include(f"Latch_{i}", asr_latch_val)
     return snc.circuit
 
 
