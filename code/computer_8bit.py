@@ -294,6 +294,16 @@ if True and __name__ == '__main__':
          heartbeat=heartbeat, verbose=True)
 
     # Generating spikes
+    # time   action              expected output
+    # 1      SET      00001101
+    # 2      COUNT_UP
+    # 3      COUNT_UP
+    # 4      READ                00001111
+    # 5      RESET
+    # 6      COUNT_UP
+    # 7      COUNT_UP
+    # 8      COUNT_UP
+    # 9      READ                00000011
     spikes = {
         # read
         0: np.array([4, 9]),

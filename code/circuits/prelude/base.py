@@ -286,7 +286,6 @@ def counter_register(heartbeat: float, n_bits: int = 8) -> SNCircuit:
         snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(n_bits)])
         for i in range(n_bits):
             snc.input(f"set_{i}", inputs=[f"Latch_{i}.set"])
-        snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(n_bits)])
         snc.input("count-up", synapses={'Latch_0.memory': {},
                                         'count-up-1': {'delay': 2}})
 
