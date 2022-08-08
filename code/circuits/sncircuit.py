@@ -4,6 +4,8 @@ from __future__ import annotations
 # Note: this code requires Python 3.9+ because of typing from generics
 
 import re
+import sys
+from enum import Enum
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,9 +13,16 @@ from numpy.typing import NDArray
 from types import TracebackType
 from typing import NamedTuple, Optional, Any, Union
 from collections.abc import Iterable, Container
+import cmath
+
+from .visualize import base as vis
 
 token_re = re.compile(r'[a-z/_+-][a-zA-Z0-9/_+-]*')
 circuit_re = re.compile(r'[A-Z][a-zA-Z0-9/_+-]*')
+reserved_ids_re = re.compile('(out|in)_([0-9]+)')
+incd_token_re = re.compile(rf'({circuit_re.pattern})\.(.+)')
+incd_out_re = re.compile(rf'({circuit_re.pattern})\.out_([0-9]+)')
+incd_in_re = re.compile(rf'({circuit_re.pattern})\.in_([0-9]+)')
 
 
 class LIF(NamedTuple):
@@ -265,17 +274,22 @@ class SNCreate:
         self.neuron_type = neuron_type
         self.neuron_params = neuron_params if neuron_params is not None else {}
         self.synapse_params = synapse_params if synapse_params is not None else {}
+        # Only params without dash (_) are "stable" api, everything else (below) is not
         self._outputs: list[frozenset[str]] = []
         self._inputs: dict[str, tuple[dict[str, SynapParams], list[str]]] = {}
         self._neurons: dict[str, tuple[NeuronType, dict[str, SynapParams], frozenset[str]]] = {}
         self._connections: dict[str, list[tuple[str, Optional[SynapParams]]]] = {}
-        self.__connections: dict[str, dict[str, SynapParams]] = {}
-        # TODO: replace these _include variables for the circuits themselves. The current
-        # strategy is simple to implement but wastes a lot of memory
         self._include_circuit_names: set[str] = set()
+        # TODO: replace these _include variables for the circuits themselves. The current
+        # strategy is simple to implement but wastes a lot of memory (SNCreate consumes
+        # SNCircuits and generates SNCircuits that are fed to other SNCreate, potentially)
         self._include_inputs: dict[str, dict[str, SynapParams]] = {}
         self._include_output_aliases: dict[str, frozenset[str]] = {}
+        # Visuals and SNCircuits for includes are used when generating larger Visuals
+        self._include_circuit_obj: dict[str, SNCircuit] = {}
+        # These are generated only once and returned every single time after that
         self.__circuit: Optional[SNCircuit] = None
+        self.__visual: Optional[SNCreateVisual] = None
 
     def __enter__(self) -> SNCreate:
         return self
@@ -293,6 +307,7 @@ class SNCreate:
         return self.__circuit
 
     def output(self, output: str | Iterable[str]) -> None:
+        assert self.__circuit is None
         if isinstance(output, str):
             self._outputs.append(frozenset({output}))
         else:
@@ -301,9 +316,10 @@ class SNCreate:
     def input(self, name: str,
               synapses: Optional[dict[str, dict[str, int | float]] | set[str]] = None,
               inputs: Optional[Iterable[str]] = None) -> None:
+        assert self.__circuit is None
 
-        # TODO: check that input does not follow the convention `out_X` or `in_X`, those
-        # are reserved tokens
+        if reserved_ids_re.match(name) is not None:
+            raise ValueError(f"`{name}` is a reserved name and cannot be used as a neuron name")
 
         if inputs is None and synapses is None:
             raise ValueError("Both `synapses` and `inputs` cannot be None at the same time")
@@ -329,6 +345,7 @@ class SNCreate:
                synapses: Optional[dict[str, dict[str, int | float]] | set[str]] = None,
                to_inputs: Optional[Iterable[str]] = None
                ) -> None:
+        assert self.__circuit is None
 
         # TODO: check that input does not follow the convention `out_X` or `in_X`, those
         # are reserved tokens
@@ -354,13 +371,22 @@ class SNCreate:
 
         self._neurons[name] = (neuron_, neuron_synapses, to_inputs)
 
-    def include(self, name: str, circuit: SNCircuit) -> None:
+    def include(
+        self,
+        name: str,
+        circuit: SNCircuit
+    ) -> None:
+        self.include_sncircuit(name, circuit)
+
+    def include_sncircuit(self, name: str, circuit: SNCircuit) -> None:
+        assert self.__circuit is None
         match = circuit_re.fullmatch(name)
         if match is None:
             raise ValueError(f"`{name}` is not a valid circuit name")
         if name in self._include_circuit_names:
             raise ValueError(f"Circuit with `{name}` has already been included")
         self._include_circuit_names.add(name)
+        self._include_circuit_obj[name] = circuit
 
         ints_to_id = {i: id for id, i in circuit.ids_to_int.items()}
 
@@ -387,6 +413,7 @@ class SNCreate:
         self, from_: str, to: str,
         synapse_params: Optional[dict[str, Union[int, float]]] = None
     ) -> None:
+        assert self.__circuit is None
         val: tuple[str, Optional[SynapParams]] = (to, None)
         if synapse_params is not None:
             syn_params = self.synapse_params | synapse_params
@@ -427,7 +454,9 @@ class SNCreate:
                 to_ret.add(ids_to_int[id_])
         return frozenset(to_ret)
 
-    def _check_additional_connections_and_simplify(self) -> None:  # noqa: C901
+    def _check_additional_connections_and_simplify(  # noqa: C901
+        self
+    ) -> dict[str, dict[str, SynapParams]]:
         """
         Checks that all additional connections are possible and dissentangles all
         `from_` outputs (groups of neurons) into only neurons, and `to`s into neurons.
@@ -465,17 +494,19 @@ class SNCreate:
                     else:
                         raise Exception(f"Neuron `{to}` couldn't be found")
 
+        to_return: dict[str, dict[str, SynapParams]] = {}
         for from_list, conns in simp_connections.items():
             for from_ in from_list:
-                if from_ in self.__connections:
-                    self.__connections[from_] |= dict(conns)
+                if from_ in to_return:
+                    to_return[from_] |= dict(conns)
                 else:
-                    self.__connections[from_] = conns
+                    to_return[from_] = conns
+        return to_return
 
     def generate(self) -> SNCircuit:
         self._check_iter_is_contained_in_neurons(
             "Outputs", [out for out_s in self._outputs for out in out_s], True)
-        self._check_additional_connections_and_simplify()
+        simpf_connections = self._check_additional_connections_and_simplify()
 
         ids_to_int = {id: i for i, id in enumerate(self._neurons)}
         inputs_id = {id: i for i, id in enumerate(self._inputs)}
@@ -501,8 +532,8 @@ class SNCreate:
         for neu_id, (neu_params, synapses, to_inputs) in self._neurons.items():
             self._check_iter_is_contained_in_neurons(f"Neuron `{neu_id}` synapses", synapses)
             # Adding new synapses from connections defined before
-            if neu_id in self.__connections:
-                synapses |= self.__connections[neu_id]
+            if neu_id in simpf_connections:
+                synapses |= simpf_connections[neu_id]
             n_synapses = {ids_to_int[n_id]: synap_params
                           for n_id, synap_params in synapses.items()}
             for input in to_inputs:
@@ -516,3 +547,388 @@ class SNCreate:
         self.__circuit = SNCircuit(outputs=outputs, inputs=inputs, inputs_id=inputs_id,
                                    neurons=neurons, ids_to_int=ids_to_int)
         return self.__circuit
+
+    def is_synapse_start(self, from_: str) -> bool:
+        match_out = incd_out_re.match(from_)
+        from_in_outputnames = False
+        if match_out:
+            name_inc, out_i = match_out[1], int(match_out[2])
+            include_obj_ = self._include_circuit_obj[name_inc]
+            from_in_outputnames = out_i < len(include_obj_.outputs)
+        return from_ in self._neurons or from_ in self._inputs \
+            or from_in_outputnames
+
+    def is_synapse_end(self, to: str) -> bool:
+        match_out = reserved_ids_re.match(to)
+        match_in = incd_in_re.match(to)
+        match_token = incd_token_re.match(to)
+        to_in_outputs = False
+        to_in_inputnames = False
+        if match_out:
+            res, out_i = match_out[1], int(match_out[2])
+            to_in_outputs = (res == 'out') and out_i < len(self._outputs)
+        if match_in:
+            name_inc, in_i = match_in[1], int(match_in[2])
+            include_obj_ = self._include_circuit_obj[name_inc]
+            to_in_inputnames = in_i < len(include_obj_.inputs)
+        elif match_token:
+            name_inc, token_name = match_token[1], match_token[2]
+            include_obj_ = self._include_circuit_obj[name_inc]
+            to_in_inputnames = token_name in include_obj_.inputs_id
+        return to in self._neurons or to_in_outputs or to_in_inputnames
+
+
+class ElementType(Enum):
+    neuron = 0
+    input = 1
+    output = 2
+
+
+def _create_connection(
+    from_: vis.Pos, to: vis.Pos, from_small: bool, to_small: bool,
+    path: Optional[list[vis.Pos]] = None
+) -> vis.Connection:
+    if path is not None and len(path) == 0:
+        path = None
+    # first and last coordinates/pos for the given connection path
+    first = to if path is None else path[0]
+    last = from_ if path is None else path[-1]
+
+    from_angle = vis.AngleRad(
+        -cmath.phase(complex(*(first-from_))),
+        0.125 if from_small else .5
+    )
+    to_angle = vis.AngleRad(
+        -cmath.phase(complex(*(last-to))),
+        0.125 if to_small else .5
+    )
+    return vis.Connection(
+        from_=(from_, from_angle),
+        to=(to, to_angle),
+        path=path
+    )
+
+
+class SNCreateVisual:
+    def __init__(self, sncreate: SNCreate):
+        self._sncreate = sncreate
+        self._size: Optional[vis.Size] = None
+        self._inputs: list[vis.Pos] = []
+        self._outputs: list[vis.Pos] = []
+        self._nodes: dict[str, vis.Node] = {}
+        self._includes: dict[str, vis.Pos] = {}
+        self._arrows: dict[str, dict[str, list[vis.Pos]]] = {}
+        self._include_visuals: dict[str, vis.CircuitDisplay] = {}
+        self.__circuit_display: Optional[vis.CircuitDisplay] = None
+
+    def _get_path_for_connection(self, from_: str, to: str) -> Optional[list[vis.Pos]]:
+        if from_ in self._arrows and to in self._arrows[from_]:
+            return self._arrows[from_][to]
+        return None
+
+    def _check_all_neurons_pos_defined(self) -> None:
+        neurons = {n for n in self._sncreate._neurons if token_re.fullmatch(n) is not None}
+        pos_not_defined = neurons - set(self._nodes)
+        if pos_not_defined:
+            raise Exception("Position for some neurons not yet defined. Not defined "
+                            f"for: {pos_not_defined}")
+
+    def _check_all_includes_are_defined(self) -> None:
+        pos_not_defined = set(self._sncreate._include_circuit_names) - set(self._includes)
+        if pos_not_defined:
+            raise Exception("Position for some included circuits not yet defined. Not "
+                            f"defined for: {pos_not_defined}")
+
+    def _find_element_pos(self, name: str) -> tuple[vis.Pos, ElementType]:
+        """
+        Find neuron, input or output position for a given name
+        """
+        match_incd_out = incd_out_re.match(name)
+        match_incd_in = incd_in_re.match(name)
+        match_incd = incd_token_re.match(name)
+        match_neuron = token_re.match(name)
+        weird_element = False
+
+        any_match_inc = match_incd_out or match_incd_in or match_incd
+        # The element is part of an include
+        if any_match_inc:
+            # extract include name and neuron name inside the included circuit
+            name_inc, name_elem = any_match_inc[1], any_match_inc[2]
+            include_ = self._get_include_visual(name_inc)
+            include_offset = self._includes[name_inc]
+            include_obj = self._sncreate._include_circuit_obj[name_inc]
+
+            # The element is an output inside an include
+            if match_incd_out:
+                # extract include and output id from out_name
+                out_i = int(name_elem)
+                pos = include_offset + include_.outputs[out_i]
+                elem_type = ElementType.output
+            # The element is an output inside an include
+            elif match_incd_in:
+                # extract include and output id from out_name
+                in_i = int(name_elem)
+                pos = include_offset + include_.outputs[in_i]
+                elem_type = ElementType.input
+            # The element is a neuron inside an included circuit
+            elif match_incd:
+                # finding specific neuron position inside the included circuit
+                if name_elem in include_obj.ids_to_int:
+                    neu_i = include_obj.ids_to_int[name_elem]
+                    pos = include_offset + include_.nodes[neu_i]
+                    elem_type = ElementType.neuron
+                else:
+                    assert name_elem in include_obj.inputs_id
+                    in_i = include_obj.inputs_id[name_elem]
+                    pos = include_offset + include_.inputs[in_i]
+                    elem_type = ElementType.input
+            else:
+                weird_element = True
+        # The element is a neuron defined by the top circuit
+        elif match_neuron:
+            assert name in self._nodes
+            pos = vis.Pos(*self._nodes[name])
+            elem_type = ElementType.neuron
+        else:
+            weird_element = True
+
+        if weird_element:
+            raise Exception(f"This is weird, `{name}` doesn't correspond to a neuron in "
+                            "the circuit nor the included circuits")
+
+        return pos, elem_type
+
+    def _add_connections_from_inputs(
+        self, connections: list[vis.Connection]
+    ) -> None:
+        for i, (name_in, (synaps, to_inputs)) in enumerate(self._sncreate._inputs.items()):
+            # connections to neurons
+            connections.extend(
+                self._connection_for(i, syn_name, ElementType.input, ElementType.neuron)
+                for syn_name in synaps
+            )
+
+            # connections to inputs from includes
+            connections.extend(
+                self._connection_for(i, to_in, ElementType.input)
+                for to_in in to_inputs
+            )
+
+    def _add_connections_for_outputs(self, connections: list[vis.Connection]) -> None:
+        connections.extend(
+            self._connection_for(out_name, i,
+                                 (ElementType.neuron, ElementType.output),
+                                 ElementType.output)
+            for i, out_set in enumerate(self._sncreate._outputs)
+            for out_name in out_set
+        )
+
+    def _add_connections_from_neurons(
+        self, connections: list[vis.Connection]
+    ) -> None:
+        # creating connections between neurons
+        for neu_name, (neu_params, synaps, to_inputs) \
+                in self._sncreate._neurons.items():
+
+            # only neurons defined in circuit are worth adding
+            match = token_re.match(neu_name)
+            if match is None:
+                continue
+
+            # connections to other neurons
+            connections.extend(
+                self._connection_for(neu_name, syn_name, ElementType.neuron, ElementType.neuron)
+                for syn_name in synaps
+            )
+
+            # connections to inputs from includes
+            connections.extend(
+                self._connection_for(neu_name, to_in, ElementType.neuron, ElementType.input)
+                for to_in in to_inputs
+            )
+
+    def _add_connections_by_explicitely_def_conns(
+        self, connections: list[vis.Connection]
+    ) -> None:
+        # creating custom connections
+        connections.extend(
+            self._connection_for(elem_name, conn)
+            for elem_name, elem_conns in self._sncreate._connections.items()
+            for conn, _ in elem_conns
+        )
+
+    def _find_element_pos_restricted_to_type(
+        self,
+        elem: str | int,
+        elem_type: Optional[tuple[ElementType, ...]]
+    ) -> tuple[str, vis.Pos, ElementType]:
+        if isinstance(elem, str):
+            pos, elem_t = self._find_element_pos(elem)
+        else:  # isinstance(from_, int)
+            assert elem_type is not None and len(elem_type) == 1 \
+                and elem_type[0] != ElementType.neuron, \
+                "If the element is an int, the type of the element must be either " \
+                f"`input` or `output`, but it is `{elem_type}`"
+
+            if elem_type[0] == ElementType.input:
+                pos = self._inputs[elem]
+                elem = f"in_{elem}"
+                # elem = list(self._sncreate._inputs.keys())[elem]
+            else:  # elem_type[0] == ElementType.output:
+                pos = self._outputs[elem]
+                elem = f"out_{elem}"
+            elem_t = elem_type[0]
+
+        # This should never be triggered if all the other checks are in place. It helps
+        # debugging inconsistencies
+        if elem_type and elem_t not in elem_type:
+            raise Exception(f"`{elem}` should be of type {elem_type} but it is "
+                            f"of type {elem_t}")
+        return elem, pos, elem_t
+
+    def _connection_for(
+        self,
+        from_: str | int,
+        to: str | int,
+        from_type: ElementType | tuple[ElementType, ...] | None = None,
+        to_type: ElementType | tuple[ElementType, ...] | None = None
+    ) -> vis.Connection:
+        # Converting from_type and to_type into tuples
+        if isinstance(from_type, ElementType):
+            from_type = (from_type,)
+        if isinstance(to_type, ElementType):
+            to_type = (to_type,)
+
+        # Actual code to elements positions!
+        from_, from_pos, from_t = self._find_element_pos_restricted_to_type(from_, from_type)
+        to, to_pos, to_t = self._find_element_pos_restricted_to_type(to, to_type)
+
+        return _create_connection(
+            from_=from_pos,
+            to=to_pos,
+            from_small=from_t != ElementType.neuron,
+            to_small=to_t != ElementType.neuron,
+            path=self._get_path_for_connection(from_, to)
+        )
+
+    def _get_include_visual(self, name_inc: str) -> vis.CircuitDisplay:
+        if name_inc not in self._include_visuals:
+            raise Exception(f"No visuals provided for include {name_inc}")
+        return self._include_visuals[name_inc]
+
+    def generate(self) -> vis.CircuitDisplay:
+        if self.__circuit_display is not None:
+            return self.__circuit_display
+
+        n_inputs = len(self._sncreate._inputs)
+        n_outputs = len(self._sncreate._outputs)
+        size = vis.Size(1, max(n_inputs, n_outputs)) if self._size is None else self._size
+        if not self._inputs:
+            self._inputs = [vis.Pos(0, i + 0.5) for i in range(n_inputs)]
+        else:
+            assert len(self._inputs) == len(self._sncreate._inputs)
+        if not self._outputs:
+            self._outputs = [vis.Pos(size.x, i + 0.5) for i in range(n_outputs)]
+        else:
+            assert len(self._outputs) == len(self._sncreate._outputs)
+        nodes_pos = {}
+        connections: list[vis.Connection] = []
+        includes: list[tuple[vis.Pos, vis.CircuitDisplay]] = []
+
+        if not self._nodes and not self._includes:
+            assert not self._arrows
+        else:
+            # all nodes and includes must be defined
+            self._check_all_includes_are_defined()
+            self._check_all_neurons_pos_defined()
+            # defining position of nodes and includes
+            nodes_pos = {self._sncreate.circuit.ids_to_int[name]: pos
+                         for name, pos in self._nodes.items()}
+            includes = [(pos_in, self._get_include_visual(name_in))
+                        for name_in, pos_in in self._includes.items()]
+
+            # creating connections from inputs, to outputs, between neurons and includes
+            self._add_connections_from_inputs(connections)
+            self._add_connections_for_outputs(connections)
+            self._add_connections_from_neurons(connections)
+            self._add_connections_by_explicitely_def_conns(connections)
+
+        self.__circuit_display = vis.CircuitDisplay(
+            name=None,
+            size=size,
+            nodes=nodes_pos,
+            inputs=self._inputs,
+            outputs=self._outputs,
+            connections=connections,
+            includes=includes
+        )
+        return self.__circuit_display
+
+    def def_node_pos(self, name: str, pos: tuple[float, float]) -> None:
+        self.__visual = None
+        match = token_re.fullmatch(name)
+        if match is None:
+            raise ValueError(f"`{name}` is not a valid neuron name")
+        if name not in self._sncreate._neurons:
+            raise ValueError(f"Neuron `{name}` has not been defined in circuit")
+        self._nodes[name] = vis.Node(*pos)
+
+    def def_include_pos(self, name: str, pos: tuple[float, float]) -> None:
+        self.__visual = None
+        match = circuit_re.fullmatch(name)
+        if match is None:
+            raise ValueError(f"`{name}` is not a valid circuit include name")
+        if name not in self._sncreate._include_circuit_names:
+            raise ValueError(f"No circuit named `{name}` has been included. "
+                             "Names of included circuits: "
+                             f"{self._sncreate._include_circuit_names}")
+        self._includes[name] = vis.Pos(*pos)
+
+    def def_size(self, width: float, height: float) -> None:
+        self.__visual = None
+        assert width > 0 and height > 0
+        self._size = vis.Size(width, height)
+
+    def def_path(self, from_: str, to: str, path: list[tuple[float, float]]) -> None:
+        self.__visual = None
+
+        # Checking that start and end points of path exists
+        if not self._sncreate.is_synapse_start(from_):
+            raise ValueError(f"No such neuron, input or output named `{from_}`")
+        if not self._sncreate.is_synapse_end(to):
+            raise ValueError(f"No such neuron, input or output named `{to}`")
+
+        # converting input token into `in_X`
+        if from_ in self._sncreate._inputs:
+            from_ = f"in_{self._sncreate.circuit.inputs_id[from_]}"
+
+        # Adding new connection/arrow path to the collection
+        if from_ not in self._arrows:
+            self._arrows[from_] = {}
+        self._arrows[from_][to] = [vis.Pos(*p) for p in path]
+
+    def def_inputs(self, inputs_pos: list[tuple[float, float]]) -> None:
+        self.__visual = None
+        n_inputs = len(self._sncreate._inputs)
+        if n_inputs != len(inputs_pos):
+            raise Exception(f'Incorrect number of input positions. There are {n_inputs} '
+                            "inputs for the circuit.")
+        self._inputs = [vis.Pos(*inpos) for inpos in inputs_pos]
+
+    def def_outputs(self, outputs_pos: list[tuple[float, float]]) -> None:
+        self.__visual = None
+        n_outputs = len(self._sncreate._outputs)
+        if n_outputs != len(outputs_pos):
+            raise Exception(f'Incorrect number of output positions. There are {n_outputs} '
+                            "inputs for the circuit.")
+        self._outputs = [vis.Pos(*outpos) for outpos in outputs_pos]
+
+    def include_visual(self, name: str, visual: vis.CircuitDisplay) -> None:
+        self.__visual = None
+        if name not in self._sncreate._include_circuit_names:
+            raise ValueError(f"No circuit named `{name}` has been included. "
+                             "Names of included circuits: "
+                             f"{self._sncreate._include_circuit_names}")
+        if name in self._include_visuals:
+            print(f"Overwriting included circuit visual {name}", file=sys.stderr)
+        self._include_visuals[name] = visual

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from ..sncircuit import SNCircuit, SNCreate, LIF
+from math import log
+
+from ..sncircuit import SNCreate, LIF, SNCreateVisual
+from ..visualize.base import CircuitDisplay
 
 
-def asr_latch(heartbeat: float) -> SNCircuit:
+def asr_latch(heartbeat: float) -> SNCreate:
     inf = 2e20
     with SNCreate(
         neuron_type=LIF,
@@ -24,10 +27,24 @@ def asr_latch(heartbeat: float) -> SNCircuit:
         snc.neuron("a", synapses={"memory": {}, "q": {}})
         snc.neuron("memory", params={"resistance": inf}, synapses={"q": {}})
         snc.neuron("q")
-    return snc.circuit
+
+    return snc
 
 
-def multi_latch(heartbeat: float, n_bits: int = 8) -> SNCircuit:
+def asr_latch_visual(snc: SNCreate) -> SNCreateVisual:
+    visual = SNCreateVisual(snc)
+
+    visual.def_size(4, 3)
+    visual.def_node_pos('a', (1.5, .8))
+    visual.def_node_pos('memory', (1.5, 2.2))
+    visual.def_node_pos('q', (3, .8))
+    # visual.def_path('activate', 'a', [(.5, .5), (.5, .8)])
+    # visual.def_path('memory', 'q', [(3, 2.2)])
+    # visual.def_path('q', 'out_0', [(3.6, .8), (3.6, .5)])
+    return visual
+
+
+def multi_latch(heartbeat: float, n_bits: int = 8) -> SNCreate:
     assert n_bits > 1
     with SNCreate(
         neuron_type=LIF,
@@ -44,14 +61,55 @@ def multi_latch(heartbeat: float, n_bits: int = 8) -> SNCircuit:
             snc.input(f"set_{i}", inputs=[f"Latch_{i}.set"])
 
         for i in range(n_bits):
-            snc.include(f"Latch_{i}", asr_latch_val)
-    return snc.circuit
+            snc.include(f"Latch_{i}", asr_latch_val.circuit)
+
+    return snc
+
+
+def multi_latch_visual(snc: SNCreate, depth: int = 1) -> SNCreateVisual:
+    n_bits = len(snc._include_circuit_names)
+    if depth == 1:
+        asr_visual = asr_latch_visual(asr_latch(1/2))
+    else:
+        assert depth == 0
+        asr_visual = SNCreateVisual(asr_latch(1/2))
+
+    visual = SNCreateVisual(snc)
+
+    for i in range(n_bits):
+        visual.include_visual(f'Latch_{i}', asr_visual.generate())
+
+    inc_width = asr_visual.generate().size.x + 1
+    width = 0.6 + inc_width * n_bits
+    height = 3.9 + .6 * n_bits
+    visual.def_size(width, height)
+    activate_height = 1.3 + .3*n_bits
+
+    for i in range(n_bits):
+        visual.def_include_pos(f'Latch_{i}', (1 + inc_width*i, .8 + .3*n_bits))
+        visual.def_path('read', f'Latch_{i}.activate',
+                        [(0.7 + inc_width*i, 0.2),
+                         (0.7 + inc_width*i, activate_height)])
+        visual.def_path(f'set_{i}', f'Latch_{i}.set',
+                        [(0.3 + inc_width*i, 0.8 + .3*i),
+                         (0.3 + inc_width*i, activate_height + 1)])
+        visual.def_path('reset', f'Latch_{i}.reset',
+                        [(0.5 + inc_width*i, 0.5),
+                         (0.5 + inc_width*i, activate_height + 2)])
+        visual.def_path(f'Latch_{i}.out_0', f'out_{i}',
+                        [(0.2 + inc_width*(i+1), activate_height),
+                         (0.2 + inc_width*(i+1), activate_height + 2.7 + .3*i)])
+
+    visual.def_inputs([(0.0, 0.2), (0, 0.5)] + [(0, 0.8 + 0.3*i) for i in range(n_bits)])
+    visual.def_outputs([(width, 4 + 0.3 * n_bits + 0.3*i) for i in range(n_bits)])
+
+    return visual
 
 
 byte_latch = multi_latch
 
 
-def two_bytes_RAM(heartbeat: float) -> SNCircuit:
+def two_bytes_RAM(heartbeat: float) -> SNCreate:
     with SNCreate(
         neuron_type=LIF,
         neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
@@ -69,8 +127,8 @@ def two_bytes_RAM(heartbeat: float) -> SNCircuit:
         snc.input("naddr", synapses={f"and_naddr_{s}" for s in new_neuron_pos})
 
         byte_latch_snc = byte_latch(heartbeat)
-        snc.include("Byte_0", byte_latch_snc)
-        snc.include("Byte_1", byte_latch_snc)
+        snc.include("Byte_0", byte_latch_snc.circuit)
+        snc.include("Byte_1", byte_latch_snc.circuit)
 
         snc.neuron("and_addr_read", to_inputs={"Byte_0.read"})
         snc.neuron("and_addr_reset", to_inputs={"Byte_0.reset"})
@@ -80,10 +138,10 @@ def two_bytes_RAM(heartbeat: float) -> SNCircuit:
             snc.neuron(f"and_addr_set_{i}", to_inputs={f"Byte_0.set_{i}"})
             snc.neuron(f"and_naddr_set_{i}", to_inputs={f"Byte_1.set_{i}"})
 
-    return snc.circuit
+    return snc
 
 
-def RAM(heartbeat: float, depth: int = 1) -> SNCircuit:  # noqa: C901
+def RAM(heartbeat: float, depth: int = 1) -> SNCreate:  # noqa: C901
     assert depth > 0
 
     def _finding_address_helper(current_bit: int, suffix: str) -> None:
@@ -153,12 +211,63 @@ def RAM(heartbeat: float, depth: int = 1) -> SNCircuit:  # noqa: C901
         # ### Including all the necessary bytes for `depth` levels
         for neu in range(2**depth):
             suffix = binary_repr.format(neu)
-            snc.include(f"Byte_{suffix}", byte_latch_snc)
+            snc.include(f"Byte_{suffix}", byte_latch_snc.circuit)
 
-    return snc.circuit
+    return snc
 
 
-def half_adder(heartbeat: float) -> SNCircuit:
+def RAM_visual(
+    snc: SNCreate,
+    byte_visual: None | CircuitDisplay | dict[str, CircuitDisplay]
+) -> SNCreateVisual:
+    ram_depth = int(log(len(snc._include_circuit_names), 2))
+    if ram_depth != 1:
+        raise NotImplementedError("Sorry, RAM visual only implemented for depth of 1")
+
+    if byte_visual is None:
+        byte_visual = SNCreateVisual(byte_latch(1/2)).generate()
+
+    visual = SNCreateVisual(snc)
+
+    bin_repr = f'{{0:0{ram_depth}b}}'
+    if isinstance(byte_visual, CircuitDisplay):
+        for i in range(2 ** ram_depth):
+            visual.include_visual(f'Byte_{bin_repr.format(i)}', byte_visual)
+        inc_width = byte_visual.size.x + 1
+        inc_heights = [byte_visual.size.y + 1 for i in range(2 ** ram_depth)]
+    else:
+        assert isinstance(byte_visual, dict)
+        inc_width = 0
+        inc_heights = []
+        for inc_name, inc_visual in byte_visual.items():
+            visual.include_visual(inc_name, inc_visual)
+            inc_width = max(inc_width, inc_visual.size.x + 1)
+            inc_heights.append(inc_visual.size.y)
+
+    width = 3 + inc_width
+    height = sum(ih + 1 for ih in inc_heights) + 1
+    visual.def_size(width, height)
+
+    acc_height = 1.0
+    for i in range(2 ** ram_depth):
+        visual.def_include_pos(f'Byte_{bin_repr.format(i)}', (3, acc_height))
+        acc_height += 1 + inc_heights[i]
+
+    visual.def_node_pos('read-0', (2, 1))
+    visual.def_node_pos('reset-0', (2, 2))
+    visual.def_node_pos('read-1', (2, 12))
+    visual.def_node_pos('reset-1', (2, 13))
+    for i in range(8):
+        visual.def_node_pos(f'set_{i}-0', (2, 3 + i))
+        visual.def_node_pos(f'set_{i}-1', (2, 14 + i))
+
+    # visual.def_inputs([(0.0, 0.2), (0, 0.5)] + [(0, 0.8 + 0.3*i) for i in range(n_bits)])
+    # visual.def_outputs([(width, 4 + 0.3 * n_bits + 0.3*i) for i in range(n_bits)])
+
+    return visual
+
+
+def half_adder(heartbeat: float) -> SNCreate:
     """
     SNCircuit with two inputs (two bits), and two outputs (addition and carry bits).
     """
@@ -176,10 +285,10 @@ def half_adder(heartbeat: float) -> SNCircuit:
         snc.neuron("mem", params={"resistance": inf}, synapses={"and", "xor"})
         snc.neuron("and", synapses={"mem"})
         snc.neuron("xor")
-    return snc.circuit
+    return snc
 
 
-def full_adder(heartbeat: float) -> SNCircuit:
+def full_adder(heartbeat: float) -> SNCreate:
     """
     SNCircuit with three inputs (three bits), and two outputs (addition and carry bits).
     """
@@ -201,10 +310,10 @@ def full_adder(heartbeat: float) -> SNCircuit:
         snc.neuron("and", synapses={"mem"})
         snc.neuron("xor-1")
         snc.neuron("xor-2")
-    return snc.circuit
+    return snc
 
 
-def two_bit_adder(heartbeat: float) -> SNCircuit:
+def two_bit_adder(heartbeat: float) -> SNCreate:
     with SNCreate(
         neuron_type=LIF,
         neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
@@ -225,12 +334,12 @@ def two_bit_adder(heartbeat: float) -> SNCircuit:
         snc.neuron('to-full_1-1', to_inputs={'Full_1.bit-1'})
         snc.neuron('to-full_1-2', to_inputs={'Full_1.bit-2'})
 
-        snc.include("Half", half)
-        snc.include("Full_1", full)
-    return snc.circuit
+        snc.include("Half", half.circuit)
+        snc.include("Full_1", full.circuit)
+    return snc
 
 
-def multi_bit_adder(heartbeat: float, n_bits: int) -> SNCircuit:
+def multi_bit_adder(heartbeat: float, n_bits: int) -> SNCreate:
     assert n_bits > 0
     with SNCreate(
         neuron_type=LIF,
@@ -261,13 +370,13 @@ def multi_bit_adder(heartbeat: float, n_bits: int) -> SNCircuit:
             snc.neuron(f'to-full_{b}-1', to_inputs={f'Full_{b}.bit-1'})
             snc.neuron(f'to-full_{b}-2', to_inputs={f'Full_{b}.bit-2'})
 
-        snc.include("Half", half)
+        snc.include("Half", half.circuit)
         for b in range(1, n_bits):
-            snc.include(f"Full_{b}", full)
-    return snc.circuit
+            snc.include(f"Full_{b}", full.circuit)
+    return snc
 
 
-def counter_register(heartbeat: float, n_bits: int = 8) -> SNCircuit:
+def counter_register(heartbeat: float, n_bits: int = 8) -> SNCreate:
     assert n_bits > 1
     """
     This is a byte latch with extra functionality, triggering `counter-up` will make the
@@ -289,17 +398,68 @@ def counter_register(heartbeat: float, n_bits: int = 8) -> SNCircuit:
         snc.input("count-up", synapses={'Latch_0.memory': {},
                                         'count-up-1': {'delay': 2}})
 
+        for i in range(1, n_bits-1):
+            snc.neuron(f'count-up-{i}', synapses={
+                f'Latch_{i}.memory': {}, f'count-up-{i+1}': {'delay': 2}})
+            snc.connection(f'Latch_{i}.memory', f'count-up-{i+1}', synapse_params={})
         if n_bits > 1:
             snc.connection('Latch_0.memory', 'count-up-1', synapse_params={})
             snc.neuron(f'count-up-{n_bits-1}', synapses={f'Latch_{n_bits-1}.memory'})
-        for i in range(1, n_bits-1):
-            snc.neuron(f'count-up-{i}', synapses={
-                f'Latch_{i}.memory': {}, f'count-up-{i}': {'delay': 2}})
-            snc.connection(f'Latch_{i}.memory', f'count-up-{i+1}', synapse_params={})
 
         for i in range(n_bits):
-            snc.include(f"Latch_{i}", asr_latch_val)
-    return snc.circuit
+            snc.include(f"Latch_{i}", asr_latch_val.circuit)
+    return snc
+
+
+def counter_register_visual(snc: SNCreate, depth: int = 0) -> SNCreateVisual:
+    n_bits = len(snc._include_circuit_names)
+    if depth == 1:
+        asr_visual = asr_latch_visual(asr_latch(1/2)).generate()
+    else:
+        assert depth == 0
+        asr_visual = SNCreateVisual(asr_latch(1/2)).generate()
+
+    visual = SNCreateVisual(snc)
+
+    for i in range(n_bits):
+        visual.include_visual(f'Latch_{i}', asr_visual)
+
+    inc_width = asr_visual.size.x + 2.5
+    width = 0.6 + inc_width * n_bits
+    height = 3.9 + .6 * n_bits
+    visual.def_size(width, height)
+    activate_height = 1.3 + .3*n_bits
+
+    for i in range(1, n_bits):
+        visual.def_node_pos(f'count-up-{i}', (-0.65 + inc_width*i, 3.0 + .3*n_bits))
+
+    for i in range(n_bits):
+        visual.def_include_pos(f'Latch_{i}', (1 + inc_width*i, .8 + .3*n_bits))
+        visual.def_path('read', f'Latch_{i}.activate',
+                        [(0.7 + inc_width*i, 0.2),
+                         (0.7 + inc_width*i, activate_height)])
+        visual.def_path(f'set_{i}', f'Latch_{i}.set',
+                        [(0.3 + inc_width*i, 0.8 + .3*i),
+                         (0.3 + inc_width*i, activate_height + 1)])
+        visual.def_path('reset', f'Latch_{i}.reset',
+                        [(0.5 + inc_width*i, 0.5),
+                         (0.5 + inc_width*i, activate_height + 2)])
+        visual.def_path(f'Latch_{i}.out_0', f'out_{i}',
+                        [(0.2 + inc_width*(i+1), activate_height),
+                         (0.2 + inc_width*(i+1), activate_height + 2.7 + .3*i)])
+
+    for i in range(1, n_bits-1):
+        visual.def_path(f'count-up-{i}', f'count-up-{i+1}',
+                        [(-0.75 + inc_width*(i+.75), activate_height + 3.4)])
+
+    visual.def_inputs(
+        [(0.0, 0.2), (0, 0.5)] +
+        [(0, 0.8 + 0.3*i) for i in range(n_bits)] +
+        [(0, 0.8 + 0.3*n_bits)]
+    )
+    visual.def_outputs([(width, 4 + 0.3 * n_bits + 0.3*i) for i in range(n_bits)])
+
+    return visual
 
 
 if __name__ == '__main__':

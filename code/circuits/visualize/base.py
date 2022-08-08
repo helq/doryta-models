@@ -30,10 +30,28 @@ class Pos(NamedTuple):
             return Pos(self.x + other[0], self.y + other[1])
         return NotImplemented
 
+    def __sub__(self, other: Any) -> Pos:
+        # This includes `Pos` itself
+        if isinstance(other, tuple) and len(other) == 2 \
+                and isinstance(other[0], (int, float)) \
+                and isinstance(other[1], (int, float)):
+            return Pos(self.x - other[0], self.y - other[1])
+        return NotImplemented
+
 
 class Size(NamedTuple):
     x: float
     y: float
+
+    def __add__(self, other: Any) -> Size:
+        # This includes `Size` itself
+        if isinstance(other, (int, float)):
+            return Size(self.x + other, self.y + other)
+        if isinstance(other, tuple) and len(other) == 2 \
+                and isinstance(other[0], (int, float)) \
+                and isinstance(other[1], (int, float)):
+            return Size(self.x + other[0], self.y + other[1])
+        return NotImplemented
 
     def __mul__(self, other: Any) -> Size:
         if isinstance(other, int):
@@ -46,24 +64,25 @@ class Size(NamedTuple):
         return NotImplemented
 
 
-class Angle(NamedTuple):
-    """Angle between 0 and 2*pi"""
+class AngleRad(NamedTuple):
+    """Angle between 0 and 2*pi, and radius (>= 0)"""
     degree: float
+    radius: float = 1.0
 
 
 class Connection(NamedTuple):
-    from_: Pos
-    to: Pos
-    from_angle: Optional[Angle]
-    to_angle: Optional[Angle]
+    from_: tuple[Pos, AngleRad]
+    to: tuple[Pos, AngleRad]
     path: Optional[list[Pos]] = None
 
 
 class CircuitDisplay(NamedTuple):
-    name: str
+    name: Optional[str]
     size: Size
-    nodes: list[Node]
+    nodes: dict[int, Node]
     inputs: list[Pos]
     outputs: list[Pos]
     connections: list[Connection]
-    include: list[tuple[Pos, CircuitDisplay]]
+    # CircuitDisplay is supposed to be recursive, but mypy doesn't support it just yet
+    # includes: list[tuple[Pos, CircuitDisplay]]
+    includes: list[tuple[Pos, Any]]

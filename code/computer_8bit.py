@@ -6,8 +6,10 @@ import numpy as np
 
 from .doryta_io.circuit_saver import save
 from .doryta_io.spikes import save_spikes_for_doryta
-from .circuits.prelude.base import byte_latch, two_bytes_RAM, RAM, half_adder, \
-    full_adder, multi_bit_adder, counter_register
+from .circuits.prelude.base import asr_latch, byte_latch, two_bytes_RAM, RAM, \
+    half_adder, full_adder, multi_bit_adder, counter_register, multi_latch, \
+    asr_latch_visual, multi_latch_visual, RAM_visual, counter_register_visual
+from .circuits.visualize.svg import save_svg
 
 dump_folder = pathlib.Path('snn-circuits/')
 
@@ -16,7 +18,7 @@ dump_folder = pathlib.Path('snn-circuits/')
 if False and __name__ == '__main__':
     heartbeat = 1/8
 
-    save(byte_latch(heartbeat),
+    save(byte_latch(heartbeat).circuit,
          dump_folder / 'snn-models' / 'byte_latch.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -53,7 +55,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/two_bytes_RAM.bin --probe-firing
     # > --output-dir=testing-8-bit/two-byte-RAM --save-state --end=10
 
-    save(two_bytes_RAM(heartbeat),
+    save(two_bytes_RAM(heartbeat).circuit,
          dump_folder / 'snn-models' / 'two_bytes_RAM.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -94,7 +96,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/16_bytes_RAM.bin --probe-firing
     # > --output-dir=testing-8-bit/16-byte-RAM --save-state --end=10
 
-    save(RAM(heartbeat, 4),
+    save(RAM(heartbeat, 4).circuit,
          dump_folder / 'snn-models' / '16_bytes_RAM.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -146,7 +148,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/half_adder.bin --probe-firing \
     # > --output-dir=testing-8-bit/half_adder --save-state --end=10
 
-    save(half_adder(heartbeat),
+    save(half_adder(heartbeat).circuit,
          dump_folder / 'snn-models' / 'half_adder.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -175,7 +177,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/full_adder.bin --probe-firing \
     # > --output-dir=testing-8-bit/full_adder --save-state --end=10
 
-    save(full_adder(heartbeat),
+    save(full_adder(heartbeat).circuit,
          dump_folder / 'snn-models' / 'full_adder.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -205,7 +207,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/two_bit_adder.bin --probe-firing \
     # > --output-dir=testing-8-bit/two_bit_adder --save-state --end=10
 
-    save(multi_bit_adder(heartbeat, 2),
+    save(multi_bit_adder(heartbeat, 2).circuit,
          dump_folder / 'snn-models' / 'two_bit_adder.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -239,7 +241,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/byte_adder.bin --probe-firing \
     # > --output-dir=testing-8-bit/byte_adder --save-state --end=10
 
-    save(multi_bit_adder(heartbeat, 8),
+    save(multi_bit_adder(heartbeat, 8).circuit,
          dump_folder / 'snn-models' / 'byte_adder.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -287,42 +289,62 @@ if True and __name__ == '__main__':
     # > src/doryta \
     # > --load-model=../data/models/snn-circuits/snn-models/counter_register.doryta.bin \
     # > --load-spikes=../data/models/snn-circuits/spikes/counter_register.bin --probe-firing \
-    # > --output-dir=testing-8-bit/counter_register --save-state --end=10
+    # > --output-dir=testing-8-bit/counter_register --save-state --end=20
 
-    save(counter_register(heartbeat),
+    save(counter_register(heartbeat).circuit,
          dump_folder / 'snn-models' / 'counter_register.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
     # Generating spikes
     # time   action              expected output
-    # 1      SET      00001101
+    # 1      SET      00001010
     # 2      COUNT_UP
     # 3      COUNT_UP
-    # 4      READ                00001111
-    # 5      RESET
-    # 6      COUNT_UP
+    # 4      READ                00001100
+    # 5      READ                00001100
+    # 6      RESET
     # 7      COUNT_UP
     # 8      COUNT_UP
-    # 9      READ                00000011
+    # 9      COUNT_UP
+    # 10     COUNT_UP
+    # 11     READ                00000100
     spikes = {
         # read
-        0: np.array([4, 9]),
+        0: np.array([4, 5, 11]),
         # reset
-        1: np.array([5]),
+        1: np.array([6]),
         # set 0-7 bits
-        2: np.array([1]),  # bit 0
-        3: np.array([]),   # bit 1
-        4: np.array([1]),  # bit 2
+        2: np.array([]),  # bit 0
+        3: np.array([1]),   # bit 1
+        4: np.array([]),  # bit 2
         5: np.array([1]),  # bit 3
         6: np.array([]),   # bit 4
         7: np.array([]),   # bit 5
         8: np.array([]),   # bit 6
         9: np.array([]),   # bit 7
         # count up
-        10: np.array([2, 3, 6, 7, 8]),
+        10: np.array([2, 3, 7, 8, 9, 10]),
     }
 
     save_spikes_for_doryta(
         dump_folder / 'spikes' / 'counter_register',
         individual_spikes=spikes
     )
+
+
+if True and __name__ == '__main__':
+    ht = 1/8
+    byte_visual2 = multi_latch_visual(multi_latch(ht, 8), depth=0).generate()
+    save_svg(byte_visual2, dump_folder / 'svgs' / "byte_latch.svg", 30)
+
+    byte_visual = multi_latch_visual(multi_latch(ht, 8), depth=1).generate()
+    save_svg(byte_visual, dump_folder / 'svgs' / "byte_latch-detailed.svg", 30)
+
+    asr_visual = asr_latch_visual(asr_latch(ht)).generate()
+    save_svg(asr_visual, dump_folder / 'svgs' / "asr_latch.svg", 30)
+
+    save_svg(RAM_visual(RAM(ht, 1), byte_visual2).generate(),
+             dump_folder / 'svgs' / "RAM.svg", 30, True)
+
+    register_visual = counter_register_visual(counter_register(ht, 8), depth=1).generate()
+    save_svg(register_visual, dump_folder / 'svgs' / "counter_register.svg", 30)
