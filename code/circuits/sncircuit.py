@@ -11,11 +11,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from types import TracebackType
-from typing import NamedTuple, Optional, Any, Union
+from typing import NamedTuple, Optional, Any, Union, Literal
 from collections.abc import Iterable, Container
-import cmath
 
-from .visualize import base as vis
+from .visualize import base as vis, positioning
 
 token_re = re.compile(r'[a-z/_+-][a-zA-Z0-9/_+-]*')
 circuit_re = re.compile(r'[A-Z][a-zA-Z0-9/_+-]*')
@@ -584,33 +583,12 @@ class ElementType(Enum):
     output = 2
 
 
-def _create_connection(
-    from_: vis.Pos, to: vis.Pos, from_small: bool, to_small: bool,
-    path: Optional[list[vis.Pos]] = None
-) -> vis.Connection:
-    if path is not None and len(path) == 0:
-        path = None
-    # first and last coordinates/pos for the given connection path
-    first = to if path is None else path[0]
-    last = from_ if path is None else path[-1]
-
-    from_angle = vis.AngleRad(
-        -cmath.phase(complex(*(first-from_))),
-        0.125 if from_small else .5
-    )
-    to_angle = vis.AngleRad(
-        -cmath.phase(complex(*(last-to))),
-        0.125 if to_small else .5
-    )
-    return vis.Connection(
-        from_=(from_, from_angle),
-        to=(to, to_angle),
-        path=path
-    )
-
-
 class SNCreateVisual:
-    def __init__(self, sncreate: SNCreate):
+    def __init__(
+        self,
+        sncreate: SNCreate,
+        graph_drawing: positioning.SugiyamaGraphDrawing | None = None
+    ):
         self._sncreate = sncreate
         self._size: Optional[vis.Size] = None
         self._inputs: list[vis.Pos] = []
@@ -620,6 +598,14 @@ class SNCreateVisual:
         self._arrows: dict[str, dict[str, list[vis.Pos]]] = {}
         self._include_visuals: dict[str, vis.CircuitDisplay] = {}
         self.__circuit_display: Optional[vis.CircuitDisplay] = None
+        if graph_drawing is None:
+            self._graph_drawing = positioning.SugiyamaGraphDrawing(
+                remove_cycles=positioning.RemoveCycleDFS(reverse=True),
+                layer_assignment=positioning.LayerAssignmentCoffmanGraham(
+                    w=2, crossings_in_layer=1
+                ))
+        else:
+            self._graph_drawing = graph_drawing
 
     def _get_path_for_connection(self, from_: str, to: str) -> Optional[list[vis.Pos]]:
         if from_ in self._arrows and to in self._arrows[from_]:
@@ -803,11 +789,11 @@ class SNCreateVisual:
         from_, from_pos, from_t = self._find_element_pos_restricted_to_type(from_, from_type)
         to, to_pos, to_t = self._find_element_pos_restricted_to_type(to, to_type)
 
-        return _create_connection(
+        return vis.straight_line_connection(
             from_=from_pos,
             to=to_pos,
-            from_small=from_t != ElementType.neuron,
-            to_small=to_t != ElementType.neuron,
+            from_size=0.5 if from_t == ElementType.neuron else 0.125,
+            to_size=0.5 if to_t == ElementType.neuron else 0.125,
             path=self._get_path_for_connection(from_, to)
         )
 
@@ -816,10 +802,60 @@ class SNCreateVisual:
             raise Exception(f"No visuals provided for include {name_inc}")
         return self._include_visuals[name_inc]
 
-    def generate(self) -> vis.CircuitDisplay:
+    def _use_graph_drawing_to_fill_in_params(self) -> None:
+        circuit = self._sncreate.circuit
+        graph = positioning.Graph(
+            vertices=set(circuit.neurons),
+            edges={n: set(synapses) for n, (_, synapses) in circuit.neurons.items()}
+        )
+        pretty_g = self._graph_drawing.find_pos(graph)
+
+        ints_to_id = {i: id for id, i in circuit.ids_to_int.items()}
+
+        # Converting positions defined by graph drawing algorithm into
+        # coordinates for SNCircuit to present
+        self._nodes = {ints_to_id[v]: vis.Node(pos[0] * 1.5 + 1.75, pos[1] * 1.5 + 1)
+                       for v, pos in pretty_g.vertices.items()}
+        self._arrows = {}
+        for v, ws in pretty_g.edges.items():
+            for w, path in ws:
+                # ignoring connections that don't have intermediate steps
+                if path:
+                    from_ = ints_to_id[v]
+                    if from_ not in self._arrows:
+                        self._arrows[from_] = {}
+                    self._arrows[from_][ints_to_id[w]] = [
+                        vis.Pos(pos[0] * 1.5 + 1.75, pos[1] * 1.5 + 1)
+                        for pos in path]
+        self._size = vis.Size(pretty_g.width * 1.5 + 2, pretty_g.height * 1.5 + .5)
+
+        n_inputs = len(self._sncreate._inputs)
+        n_outputs = len(self._sncreate._outputs)
+        self._inputs = [vis.Pos(0, i * 1.5 + 1) for i in range(n_inputs)]
+        self._outputs = [vis.Pos(self._size.x, i * 1.5 + 1) for i in range(n_outputs)]
+
+    def generate(
+        self,
+        mode: Literal['auto', 'manual', 'empty'] | None = None
+    ) -> vis.CircuitDisplay:
         if self.__circuit_display is not None:
             return self.__circuit_display
+        if mode is None:
+            mode = 'manual' if self._nodes or self._includes else 'empty'
 
+        # Filling in parameters automatically if auto mode has been selected
+        if mode == 'auto':
+            if self._nodes or self._includes:
+                raise Exception("No node or include location can be assigned in `auto` mode")
+            if self._sncreate._include_circuit_names:
+                raise Exception("`auto` mode only works when there are no includes")
+            self._use_graph_drawing_to_fill_in_params()
+        elif mode == 'manual':
+            # all nodes and includes must be defined
+            self._check_all_includes_are_defined()
+            self._check_all_neurons_pos_defined()
+
+        # Defining extra parameters
         n_inputs = len(self._sncreate._inputs)
         n_outputs = len(self._sncreate._outputs)
         size = vis.Size(1, max(n_inputs, n_outputs)) if self._size is None else self._size
@@ -831,16 +867,12 @@ class SNCreateVisual:
             self._outputs = [vis.Pos(size.x, i + 0.5) for i in range(n_outputs)]
         else:
             assert len(self._outputs) == len(self._sncreate._outputs)
+
         nodes_pos = {}
         connections: list[vis.Connection] = []
         includes: list[tuple[vis.Pos, vis.CircuitDisplay]] = []
 
-        if not self._nodes and not self._includes:
-            assert not self._arrows
-        else:
-            # all nodes and includes must be defined
-            self._check_all_includes_are_defined()
-            self._check_all_neurons_pos_defined()
+        if mode != 'empty':
             # defining position of nodes and includes
             nodes_pos = {self._sncreate.circuit.ids_to_int[name]: pos
                          for name, pos in self._nodes.items()}

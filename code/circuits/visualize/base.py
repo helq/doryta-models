@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import cmath
+
 from typing import NamedTuple, Any, Optional
 
 
@@ -83,6 +85,26 @@ class CircuitDisplay(NamedTuple):
     inputs: list[Pos]
     outputs: list[Pos]
     connections: list[Connection]
-    # CircuitDisplay is supposed to be recursive, but mypy doesn't support it just yet
+    # CircuitDisplay is supposed to be a recursive type, but mypy doesn't support it just yet
     # includes: list[tuple[Pos, CircuitDisplay]]
     includes: list[tuple[Pos, Any]]
+
+
+def straight_line_connection(
+    from_: Pos, to: Pos, from_size: float, to_size: float,
+    path: Optional[list[Pos]] = None
+) -> Connection:
+    if path is not None and len(path) == 0:
+        path = None
+    # first and last coordinates/pos for the given connection path
+    first = to if path is None else path[0]
+    last = from_ if path is None else path[-1]
+
+    from_angle = AngleRad(-cmath.phase(complex(*(first-from_))), from_size)
+    to_angle = AngleRad(-cmath.phase(complex(*(last-to))), to_size)
+
+    return Connection(
+        from_=(from_, from_angle),
+        to=(to, to_angle),
+        path=path
+    )

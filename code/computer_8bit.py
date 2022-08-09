@@ -6,10 +6,10 @@ import numpy as np
 
 from .doryta_io.circuit_saver import save
 from .doryta_io.spikes import save_spikes_for_doryta
-from .circuits.prelude.base import asr_latch, byte_latch, two_bytes_RAM, RAM, \
-    half_adder, full_adder, multi_bit_adder, counter_register, multi_latch, \
-    asr_latch_visual, multi_latch_visual, RAM_visual, counter_register_visual
+from .circuits.prelude import base
 from .circuits.visualize.svg import save_svg
+from .circuits.visualize import positioning
+from .circuits.sncircuit import SNCreateVisual
 
 dump_folder = pathlib.Path('snn-circuits/')
 
@@ -18,7 +18,7 @@ dump_folder = pathlib.Path('snn-circuits/')
 if False and __name__ == '__main__':
     heartbeat = 1/8
 
-    save(byte_latch(heartbeat).circuit,
+    save(base.byte_latch(heartbeat).circuit,
          dump_folder / 'snn-models' / 'byte_latch.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -55,7 +55,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/two_bytes_RAM.bin --probe-firing
     # > --output-dir=testing-8-bit/two-byte-RAM --save-state --end=10
 
-    save(two_bytes_RAM(heartbeat).circuit,
+    save(base.two_bytes_RAM(heartbeat).circuit,
          dump_folder / 'snn-models' / 'two_bytes_RAM.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -96,7 +96,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/16_bytes_RAM.bin --probe-firing
     # > --output-dir=testing-8-bit/16-byte-RAM --save-state --end=10
 
-    save(RAM(heartbeat, 4).circuit,
+    save(base.RAM(heartbeat, 4).circuit,
          dump_folder / 'snn-models' / '16_bytes_RAM.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -148,7 +148,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/half_adder.bin --probe-firing \
     # > --output-dir=testing-8-bit/half_adder --save-state --end=10
 
-    save(half_adder(heartbeat).circuit,
+    save(base.half_adder(heartbeat).circuit,
          dump_folder / 'snn-models' / 'half_adder.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -177,7 +177,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/full_adder.bin --probe-firing \
     # > --output-dir=testing-8-bit/full_adder --save-state --end=10
 
-    save(full_adder(heartbeat).circuit,
+    save(base.full_adder(heartbeat).circuit,
          dump_folder / 'snn-models' / 'full_adder.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -207,7 +207,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/two_bit_adder.bin --probe-firing \
     # > --output-dir=testing-8-bit/two_bit_adder --save-state --end=10
 
-    save(multi_bit_adder(heartbeat, 2).circuit,
+    save(base.multi_bit_adder(heartbeat, 2).circuit,
          dump_folder / 'snn-models' / 'two_bit_adder.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -241,7 +241,7 @@ if False and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/byte_adder.bin --probe-firing \
     # > --output-dir=testing-8-bit/byte_adder --save-state --end=10
 
-    save(multi_bit_adder(heartbeat, 8).circuit,
+    save(base.multi_bit_adder(heartbeat, 8).circuit,
          dump_folder / 'snn-models' / 'byte_adder.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -291,7 +291,7 @@ if True and __name__ == '__main__':
     # > --load-spikes=../data/models/snn-circuits/spikes/counter_register.bin --probe-firing \
     # > --output-dir=testing-8-bit/counter_register --save-state --end=20
 
-    save(counter_register(heartbeat).circuit,
+    save(base.counter_register(heartbeat).circuit,
          dump_folder / 'snn-models' / 'counter_register.doryta.bin',
          heartbeat=heartbeat, verbose=True)
 
@@ -334,17 +334,35 @@ if True and __name__ == '__main__':
 
 if True and __name__ == '__main__':
     ht = 1/8
-    byte_visual2 = multi_latch_visual(multi_latch(ht, 8), depth=0).generate()
+    byte_visual2 = base.multi_latch_visual(base.multi_latch(ht, 8), depth=0).generate()
     save_svg(byte_visual2, dump_folder / 'svgs' / "byte_latch.svg", 30)
 
-    byte_visual = multi_latch_visual(multi_latch(ht, 8), depth=1).generate()
+    byte_visual = base.multi_latch_visual(base.multi_latch(ht, 8), depth=1).generate()
     save_svg(byte_visual, dump_folder / 'svgs' / "byte_latch-detailed.svg", 30)
 
-    asr_visual = asr_latch_visual(asr_latch(ht)).generate()
+    asr_visual = base.asr_latch_visual(base.asr_latch(ht)).generate()
     save_svg(asr_visual, dump_folder / 'svgs' / "asr_latch.svg", 30)
 
-    save_svg(RAM_visual(RAM(ht, 1), byte_visual2).generate(),
-             dump_folder / 'svgs' / "RAM.svg", 30, True)
+    save_svg(base.RAM_visual(base.RAM(ht, 1), byte_visual2).generate(),
+             dump_folder / 'svgs' / "RAM.svg", 30)
 
-    register_visual = counter_register_visual(counter_register(ht, 8), depth=1).generate()
+    register_visual = base.counter_register_visual(base.counter_register(ht, 8), depth=1).generate()
     save_svg(register_visual, dump_folder / 'svgs' / "counter_register.svg", 30)
+
+    # Autogenerated testing
+    asr_visual = SNCreateVisual(base.asr_latch(ht)).generate(mode='auto')
+    save_svg(asr_visual, dump_folder / 'svgs' / "asr_latch-auto.svg", 30)
+
+    fulladder_visual = SNCreateVisual(base.full_adder(ht)).generate(mode='auto')
+    save_svg(fulladder_visual, dump_folder / 'svgs' / "fulladder-auto.svg", 30)
+
+    graph_drawing = positioning.SugiyamaGraphDrawing(
+        remove_cycles=positioning.RemoveCycleDFS(reverse=True),
+        layer_assignment=positioning.LayerAssignmentCoffmanGraham(
+            w=3, crossings_in_layer=1
+        ))
+    fulladder_visual = SNCreateVisual(base.full_adder(ht), graph_drawing).generate(mode='auto')
+    save_svg(fulladder_visual, dump_folder / 'svgs' / "fulladder-auto2.svg", 30)
+
+    halfadder_visual = SNCreateVisual(base.half_adder(ht), graph_drawing).generate(mode='auto')
+    save_svg(halfadder_visual, dump_folder / 'svgs' / "halfadder-auto.svg", 30)
