@@ -6,6 +6,7 @@ graph. A drop in module for visualization.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from typing import NamedTuple, Optional
 
 from .base import CircuitDisplay, Size, Node, Pos as visPos, straight_line_connection
@@ -29,6 +30,7 @@ class Graph(NamedTuple):
                 return False
         return True
 
+    @property
     def reversed_edges(self) -> dict[int, set[int]]:
         redges: dict[int, set[int]] = {v: set() for v in self.vertices}
         for v, ws in self.edges.items():
@@ -36,6 +38,31 @@ class Graph(NamedTuple):
                 assert w in redges
                 redges[w].add(v)
         return redges
+
+    def subgraph(
+        self,
+        keep: Optional[set[int]] = None,
+        remove: Optional[set[int]] = None
+    ) -> Graph:
+        if keep is not None and remove is not None:
+            raise ValueError("keep and remove cannot be selected at the same time")
+
+        if keep is not None:
+            return Graph(
+                vertices=self.vertices.intersection(keep),
+                edges={v: ws.intersection(keep)
+                       for v, ws in self.edges.items()
+                       if v in keep}
+            )
+        elif remove is not None:
+            return Graph(
+                vertices=self.vertices - remove,
+                edges={v: ws - remove
+                       for v, ws in self.edges.items()
+                       if v not in remove}
+            )
+        else:
+            raise ValueError("Either keep or remove must be assigned")
 
 
 Pos = tuple[float, float]
@@ -102,7 +129,11 @@ class RemoveCycleDFS(RemoveCycles):
 
 class LayerAssignment(ABC):
     @abstractmethod
-    def assign(self, g: Graph) -> list[set[int]]:
+    def assign(
+        self,
+        g: Graph,
+        bias: Optional[dict[int, float]] = None
+    ) -> list[list[int]]:
         pass
 
 
@@ -150,19 +181,30 @@ class LayerAssignmentCoffmanGraham(LayerAssignment):
             return layer_not_full \
                 and self._vertex_num_conns(g, v, layer) <= self.crossings_in_layer
 
-    def assign(self, g: Graph) -> list[set[int]]:
+    def assign(
+        self,
+        g: Graph,
+        bias: dict[int, float] | None = None
+    ) -> list[list[int]]:
         if not g.check_correctness():
             raise ValueError("The graph is faulty")
+        if bias is None:
+            bias = defaultdict(float)
 
         layers: list[set[int]] = [set()]
 
         # 0a. Transitive reduction of graph
         edges = self._transitive_reduction(g)
         # 0b. Reversing edges
-        reversed_edges = Graph(g.vertices, edges).reversed_edges()
+        reversed_edges = Graph(g.vertices, edges).reversed_edges
 
         # 1. Sort vertices by the number incoming edges
-        vertices = list(sorted(g.vertices, key=lambda v: len(reversed_edges[v])))
+
+        # sorted based on the number of incoming edges with an optional bias
+        vertices = list(sorted(
+            g.vertices,
+            key=lambda v: (bias[v], len(reversed_edges[v]))  # type: ignore
+        ))
 
         # 2. Select a vertex at the time such that it uses the highest amount of vertices
         selected_vertices: set[int] = set()
@@ -180,14 +222,14 @@ class LayerAssignmentCoffmanGraham(LayerAssignment):
                 layers.append({v})
             selected_vertices.add(v)
 
-        return list(reversed(layers))
+        return [list(lay) for lay in reversed(layers)]
 
 
 class SugiyamaGraphDrawing:
     def __init__(
         self,
         remove_cycles: Optional[RemoveCycles] = None,
-        layer_assignment: Optional[LayerAssignment] = None
+        layer_assignment: Optional[LayerAssignment] = None,
     ) -> None:
         self._remove_cycles = RemoveCycleDFS() if remove_cycles is None else remove_cycles
         self._layer_assignment = LayerAssignmentCoffmanGraham(5, 1) \
@@ -195,7 +237,7 @@ class SugiyamaGraphDrawing:
             else layer_assignment
 
     def _extend_layers(
-        self, g: Graph, layers: list[set[int]]
+        self, g: Graph, layers: list[list[int]]
     ) -> tuple[Graph, list[list[int]], set[int], dict[tuple[int, int], list[int]]]:
         """
         This function takes a graph and its nodes ordered in layers, and adds dummy nodes
@@ -275,23 +317,52 @@ class SugiyamaGraphDrawing:
                    for v, ws in graph.edges.items()}
         )
 
-    def find_pos(self, graph: Graph) -> GraphWithPos:
+    def find_pos(
+        self,
+        graph: Graph,
+        inputs: Optional[list[int]] = None,
+        outputs: Optional[list[int]] = None,
+    ) -> GraphWithPos:
+        if inputs is None:
+            inputs = []
+        if outputs is None:
+            outputs = []
         # Sugiyama method steps
         # 1. Removing cycles
         graph_no_cycles, _ = self._remove_cycles.remove_cycles(graph)
+
         # 2. Layering assignments
-        layers = self._layer_assignment.assign(graph_no_cycles)
+
+        # If input or output nodes are defined, they will be ignored
+        # A positive bias will nudge the vertex to the last layers, a negative bias to the
+        # first layers. Nodes connected to input nodes should be closer to the input. The
+        # same goes for output nodes
+        bias = defaultdict(float, {w: -1.0 for v in inputs for w in graph.edges[v]})
+        for v in outputs:
+            for w in graph.reversed_edges[v]:
+                # if w is both in inputs and outputs, it should a bias of 0, otherwise 1
+                bias[w] = 0 if w in bias else 1
+        layers = self._layer_assignment.assign(
+            graph_no_cycles.subgraph(remove=set(inputs) | set(outputs)),
+            bias=bias
+        )
+
+        # 2b. Adding inputs and outputs, previously ignored
+        if inputs:
+            layers.insert(0, inputs)
+        if outputs:
+            layers.append(outputs)
         # 2b. Extending layers to include dummy nodes for long distance edges
         graph_extended, layers_extended, new_nodes, edges_modified = \
             self._extend_layers(graph_no_cycles, layers)
 
-        prettified_graph = self._graph_with_pos_from_layers_extended(
+        graph_with_pos = self._graph_with_pos_from_layers_extended(
             graph_no_cycles, layers_extended, new_nodes, edges_modified)
 
         # Extra. Reversing reversed/deleted connections
         # TODO: Implement this stage!!
 
-        return prettified_graph
+        return graph_with_pos
 
 
 def graph_to_circuitdisplay(g: GraphWithPos) -> CircuitDisplay:

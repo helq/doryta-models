@@ -598,14 +598,7 @@ class SNCreateVisual:
         self._arrows: dict[str, dict[str, list[vis.Pos]]] = {}
         self._include_visuals: dict[str, vis.CircuitDisplay] = {}
         self.__circuit_display: Optional[vis.CircuitDisplay] = None
-        if graph_drawing is None:
-            self._graph_drawing = positioning.SugiyamaGraphDrawing(
-                remove_cycles=positioning.RemoveCycleDFS(reverse=True),
-                layer_assignment=positioning.LayerAssignmentCoffmanGraham(
-                    w=2, crossings_in_layer=1
-                ))
-        else:
-            self._graph_drawing = graph_drawing
+        self._graph_drawing = graph_drawing
 
     def _get_path_for_connection(self, from_: str, to: str) -> Optional[list[vis.Pos]]:
         if from_ in self._arrows and to in self._arrows[from_]:
@@ -802,20 +795,57 @@ class SNCreateVisual:
             raise Exception(f"No visuals provided for include {name_inc}")
         return self._include_visuals[name_inc]
 
-    def _use_graph_drawing_to_fill_in_params(self) -> None:
-        circuit = self._sncreate.circuit
-        graph = positioning.Graph(
-            vertices=set(circuit.neurons),
-            edges={n: set(synapses) for n, (_, synapses) in circuit.neurons.items()}
-        )
-        pretty_g = self._graph_drawing.find_pos(graph)
+    def _get_graph_drawing(self) -> positioning.SugiyamaGraphDrawing:
+        if self._graph_drawing is None:
+            return positioning.SugiyamaGraphDrawing(
+                remove_cycles=positioning.RemoveCycleDFS(reverse=True),
+                layer_assignment=positioning.LayerAssignmentCoffmanGraham(
+                    w=2, crossings_in_layer=1
+                ))
+        return self._graph_drawing
 
-        ints_to_id = {i: id for id, i in circuit.ids_to_int.items()}
+    def _use_graph_drawing_to_fill_in_params(self) -> None:
+        # Defining graph from circuit data
+        circuit = self._sncreate.circuit
+        n_inputs = len(circuit.inputs)
+        n_outputs = len(circuit.outputs)
+
+        max_neu_id = max(circuit.neurons) + 10
+        input_nodes = list(range(max_neu_id, max_neu_id + n_inputs))
+        max_neu_id += n_inputs
+        output_nodes = list(range(max_neu_id, max_neu_id + n_outputs))
+
+        # Extending edges with input and output connections
+        edges: dict[int, set[int]] = \
+            {n: set(synapses) for n, (_, synapses) in circuit.neurons.items()} \
+            | {n: set(synapses) for n, synapses in zip(input_nodes, circuit.inputs)} \
+            | {n: set() for n in output_nodes}
+        for out, neurs in zip(output_nodes, circuit.outputs):
+            for n in neurs:
+                edges[n].add(out)
+        graph = positioning.Graph(
+            vertices=set(circuit.neurons) | set(input_nodes) | set(output_nodes),
+            edges=edges
+        )
+        pretty_g = self._get_graph_drawing().find_pos(
+            graph,
+            inputs=input_nodes if input_nodes else None,
+            outputs=output_nodes if output_nodes else None
+        )
+
+        ints_to_id = {i: id for id, i in circuit.ids_to_int.items()} \
+            | {n: f'in_{i}' for i, n in enumerate(input_nodes)} \
+            | {n: f'out_{i}' for i, n in enumerate(output_nodes)}
+        ignore_nodes = set(input_nodes) | set(output_nodes)
+
+        x_shift = 0 if input_nodes else 1
 
         # Converting positions defined by graph drawing algorithm into
         # coordinates for SNCircuit to present
-        self._nodes = {ints_to_id[v]: vis.Node(pos[0] * 1.5 + 1.75, pos[1] * 1.5 + 1)
-                       for v, pos in pretty_g.vertices.items()}
+        self._nodes = {
+            ints_to_id[v]: vis.Node(pos[0] * 1.5 + x_shift + .75, pos[1] * 1.5 + 1)
+            for v, pos in pretty_g.vertices.items()
+            if v not in ignore_nodes}
         self._arrows = {}
         for v, ws in pretty_g.edges.items():
             for w, path in ws:
@@ -825,9 +855,12 @@ class SNCreateVisual:
                     if from_ not in self._arrows:
                         self._arrows[from_] = {}
                     self._arrows[from_][ints_to_id[w]] = [
-                        vis.Pos(pos[0] * 1.5 + 1.75, pos[1] * 1.5 + 1)
+                        vis.Pos(pos[0] * 1.5 + x_shift + .75, pos[1] * 1.5 + 1)
                         for pos in path]
-        self._size = vis.Size(pretty_g.width * 1.5 + 2, pretty_g.height * 1.5 + .5)
+
+        out_shift = 0 if output_nodes else 1
+        self._size = vis.Size(pretty_g.width * 1.5 + x_shift + out_shift,
+                              pretty_g.height * 1.5 + .5)
 
         n_inputs = len(self._sncreate._inputs)
         n_outputs = len(self._sncreate._outputs)
