@@ -356,10 +356,12 @@ if True and __name__ == '__main__':
     graph_drawing = positioning.SugiyamaGraphDrawing(
         remove_cycles=positioning.RemoveCycleDFS(reverse=True),
         layer_assignment=positioning.LayerAssignmentCoffmanGraham(
-            w=3, crossings_in_layer=1
-        ))
+            w=3, crossings_in_layer=1),
+        reuse_nodes=True
+    )
     fulladder_visual = SNCreateVisual(base.full_adder(ht), graph_drawing).generate(mode='auto')
-    save_svg(fulladder_visual, dump_folder / 'svgs' / "fulladder-auto2.svg", 30)
+    save_svg(fulladder_visual, dump_folder / 'svgs' / "fulladder-auto2.svg", 30,
+             print_dummy=True)
 
     halfadder_visual = SNCreateVisual(base.half_adder(ht), graph_drawing).generate(mode='auto')
     save_svg(halfadder_visual, dump_folder / 'svgs' / "halfadder-auto.svg", 30)

@@ -22,12 +22,13 @@ def _insert_circuit_in_drawing(
     cd: CircuitDisplay,
     dwg: svgwrite.Drawing,
     zoom: float,
+    print_dummy: bool,
     shift: Pos
 ) -> None:
     id_param = {} if cd.name is None else {'id': cd.name}
     # Inserting more circuits down the line
     for pos, inc_circuit in cd.includes:
-        _insert_circuit_in_drawing(inc_circuit, dwg, zoom, shift + pos)
+        _insert_circuit_in_drawing(inc_circuit, dwg, zoom, print_dummy, shift + pos)
 
     circuit_group = dwg.add(dwg.g(fill='none', stroke='black', stroke_width=1, **id_param))
     circuit_group.add(dwg.rect(insert=shift * zoom, size=cd.size * zoom))
@@ -48,6 +49,7 @@ def _insert_circuit_in_drawing(
                                      fill='black'))
 
     # Defining connections
+    dummy_nodes: set[Pos] = set()
     for conn in cd.connections:
         start_align = _offset_for_angle(conn.from_[1])
         end_align = _offset_for_angle(conn.to[1])
@@ -60,12 +62,21 @@ def _insert_circuit_in_drawing(
             line2 = dwg.line(start=start, end=finish, stroke='white', stroke_width=5)
             line = dwg.line(start=start, end=finish)
         else:
-            points = [start] + [(p + shift) * zoom for p in conn.path] + [finish]
+            in_between_positions = [(p + shift) * zoom for p in conn.path]
+            points = [start] + in_between_positions + [finish]
             line2 = dwg.polyline(points=points, stroke='white', stroke_width=3)
             line = dwg.polyline(points=points)
+            dummy_nodes |= set(in_between_positions)
         line.set_markers((None, None, '#arrow-head'))
         circuit_group.add(line2)
         circuit_group.add(line)
+
+    if print_dummy:
+        for pos in dummy_nodes:
+            circuit_group.add(dwg.rect(
+                insert=pos - 0.06 * zoom, size=(zoom*.12, zoom*.12),
+                fill='white'
+            ))
 
 
 def _add_grid(dwg: svgwrite.Drawing, size: Size, zoom: float) -> None:
@@ -110,7 +121,8 @@ def save_svg(
     cd: CircuitDisplay,
     path: str | Path,
     zoom: float = 10,
-    grid: bool = False
+    grid: bool = False,
+    print_dummy: bool = False
 ) -> None:
     grid_offset = .5 * zoom if grid else 0
     canvas_size = cd.size * zoom + grid_offset
@@ -135,7 +147,7 @@ def save_svg(
     if grid:
         _add_grid(dwg, cd.size, zoom)
 
-    _insert_circuit_in_drawing(cd, dwg, zoom, Pos(0, 0))
+    _insert_circuit_in_drawing(cd, dwg, zoom, print_dummy, Pos(0, 0))
 
     dwg.save()
 

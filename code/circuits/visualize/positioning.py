@@ -230,14 +230,17 @@ class SugiyamaGraphDrawing:
         self,
         remove_cycles: Optional[RemoveCycles] = None,
         layer_assignment: Optional[LayerAssignment] = None,
+        reuse_nodes: bool = True
     ) -> None:
         self._remove_cycles = RemoveCycleDFS() if remove_cycles is None else remove_cycles
         self._layer_assignment = LayerAssignmentCoffmanGraham(5, 1) \
             if layer_assignment is None \
             else layer_assignment
+        self.reuse_nodes = reuse_nodes
 
     def _extend_layers(
-        self, g: Graph, layers: list[list[int]]
+        self, g: Graph, layers: list[list[int]],
+        reuse_nodes: bool = False
     ) -> tuple[Graph, list[list[int]], set[int], dict[tuple[int, int], list[int]]]:
         """
         This function takes a graph and its nodes ordered in layers, and adds dummy nodes
@@ -251,6 +254,14 @@ class SugiyamaGraphDrawing:
         4. The connections that were removed/replaced in the process (and their
            replacements)
         """
+        if reuse_nodes:
+            return self._extend_layers_reuse_nodes(g, layers)
+        else:
+            return self._extend_layers_simple(g, layers)
+
+    def _extend_layers_simple(
+        self, g: Graph, layers: list[list[int]]
+    ) -> tuple[Graph, list[list[int]], set[int], dict[tuple[int, int], list[int]]]:
         max_index = max(g.vertices)
         new_index = max_index + 10
 
@@ -283,6 +294,114 @@ class SugiyamaGraphDrawing:
             edges_ext[v] -= ws_to_del
 
         return Graph(g.vertices | new_nodes, edges_ext), layers_ext, new_nodes, edges_modified
+
+    def _combine_dummy_nodes_backwards(
+        self, g: Graph, new_nodes: set[int], edges_ext: Edges, layers_ext: list[list[int]],
+        edges_modified: dict[tuple[int, int], list[int]]
+    ) -> tuple[set[int], Edges, list[list[int]], dict[tuple[int, int], list[int]]]:
+        reversed_edges = Graph(g.vertices | new_nodes, edges_ext).reversed_edges
+        layers_index = {v: layer_i
+                        for layer_i, vs in enumerate(layers_ext)
+                        for v in vs}
+
+        reduced_edges_ext = {n: v.copy() for n, v in edges_ext.items()}
+
+        to_del_nodes: dict[int, int] = {}
+        for v in g.vertices:
+            ind_v = layers_index[v]
+            prev_dummy = {w for w in reversed_edges[v]
+                          if w in new_nodes and layers_index[w] == ind_v - 1}
+            i = 1
+            while prev_dummy:
+                new_dummy = prev_dummy.pop()
+                for dummy in prev_dummy:
+                    if len(reduced_edges_ext[dummy]) == 1:
+                        for w in reversed_edges[dummy]:
+                            reduced_edges_ext[w].remove(dummy)
+                            reduced_edges_ext[w].add(new_dummy)
+                        to_del_nodes[dummy] = new_dummy
+
+                i += 1
+                prev_dummy = {w for v in prev_dummy
+                              for w in reversed_edges[v]
+                              if w in new_nodes and layers_index[w] == ind_v - i}
+
+        reduced_layers_ext = [lay[:] for lay in layers_ext]
+        for v in to_del_nodes:
+            del reduced_edges_ext[v]
+            reduced_layers_ext[layers_index[v]].remove(v)
+
+        edges_modified = {k: [to_del_nodes[n] if n in to_del_nodes else n
+                              for n in dummy_nodes]
+                          for k, dummy_nodes in edges_modified.items()}
+
+        return new_nodes - set(to_del_nodes), reduced_edges_ext, reduced_layers_ext, \
+            edges_modified
+
+    def _extend_layers_reuse_nodes(
+        self, g: Graph, layers: list[list[int]]
+    ) -> tuple[Graph, list[list[int]], set[int], dict[tuple[int, int], list[int]]]:
+        max_index = max(g.vertices)
+        new_index = max_index + 10
+
+        layers_index = {v: layer_i
+                        for layer_i, vs in enumerate(layers)
+                        for v in vs}
+
+        # Constructing new graph by adding intermediate nodes
+        edges_ext = {v: ws.copy() for v, ws in g.edges.items()}
+        layers_ext = [list(layer) for layer in layers]
+        edges_modified: dict[int, tuple[list[int], dict[int, int]]] = \
+            defaultdict(lambda: ([], defaultdict(int)))
+        new_nodes: set[int] = set()
+        for v in g.vertices:
+            ws_to_del: set[int] = set()
+            for w in g.edges[v]:
+                start_new_nodes = layers_index[v] + 1
+                w_pos = layers_index[w]
+                # are there intermediate layers between v and w?
+                if start_new_nodes >= w_pos:
+                    continue
+                ws_to_del.add(w)
+                nodes_ahead = len(edges_modified[v][0])
+                # have nodes already been created between v and w
+                if edges_modified[v][0]:
+                    if start_new_nodes + nodes_ahead < w_pos:
+                        # connect last node in new change of nodes to new_index node
+                        last_node_in_line = edges_modified[v][0][-1]
+                        edges_ext[last_node_in_line].add(new_index)
+                        edges_modified[v][1][w] = nodes_ahead
+                    else:
+                        # make a connection from an intermediate node to w
+                        intermediate_nodes = w_pos - start_new_nodes
+                        node_before_w = edges_modified[v][0][intermediate_nodes - 1]
+                        edges_ext[node_before_w].add(w)
+                        edges_modified[v][1][w] = intermediate_nodes
+                else:
+                    edges_ext[v].add(new_index)
+                # for each of the remaining layers in between v and w, add new nodes
+                for i in range(start_new_nodes + nodes_ahead, w_pos):
+                    # add intermediate nodes and new edges
+                    layers_ext[i].append(new_index)
+                    edges_ext[new_index] = {w if w_pos == i+1 else new_index + 1}
+                    edges_modified[v][0].append(new_index)
+                    edges_modified[v][1][w] += 1
+                    new_nodes.add(new_index)
+
+                    new_index += 1
+            edges_ext[v] -= ws_to_del
+
+        edges_modified_ = {(v, w): ls[:size] for v, (ls, ws) in edges_modified.items()
+                           for w, size in ws.items()}
+
+        # This call can be commented and the code will keep working. This call fuses
+        # redundant dummy nodes backwards (starting at some node and going backwards)
+        new_nodes, edges_ext, layers_ext, edges_modified_ = \
+            self._combine_dummy_nodes_backwards(
+                g, new_nodes, edges_ext, layers_ext, edges_modified_)
+
+        return Graph(g.vertices | new_nodes, edges_ext), \
+            layers_ext, new_nodes, edges_modified_
 
     def _graph_with_pos_from_layers_extended(
         self,
@@ -354,7 +473,7 @@ class SugiyamaGraphDrawing:
             layers.append(outputs)
         # 2b. Extending layers to include dummy nodes for long distance edges
         graph_extended, layers_extended, new_nodes, edges_modified = \
-            self._extend_layers(graph_no_cycles, layers)
+            self._extend_layers(graph_no_cycles, layers, reuse_nodes=self.reuse_nodes)
 
         graph_with_pos = self._graph_with_pos_from_layers_extended(
             graph_no_cycles, layers_extended, new_nodes, edges_modified)

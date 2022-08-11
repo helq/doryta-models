@@ -38,6 +38,8 @@ class Pos(NamedTuple):
                 and isinstance(other[0], (int, float)) \
                 and isinstance(other[1], (int, float)):
             return Pos(self.x - other[0], self.y - other[1])
+        if isinstance(other, (int, float)):
+            return Pos(self.x - other, self.y - other)
         return NotImplemented
 
 
