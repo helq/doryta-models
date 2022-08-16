@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import NamedTuple, Optional
+import statistics
+from math import sqrt, ceil
+from typing import NamedTuple, Optional, Literal, Iterable, Iterator
 
 from .base import CircuitDisplay, Size, Node, Pos as visPos, straight_line_connection
 from .svg import save_svg
@@ -38,6 +40,15 @@ class Graph(NamedTuple):
                 assert w in redges
                 redges[w].add(v)
         return redges
+
+    def degree(self, v: int) -> int:
+        return len(self.edges[v])
+
+    def deep_copy(self) -> Graph:
+        return Graph(
+            vertices=self.vertices.copy(),
+            edges={v: ws.copy() for v, ws in self.edges.items()}
+        )
 
     def subgraph(
         self,
@@ -225,22 +236,49 @@ class LayerAssignmentCoffmanGraham(LayerAssignment):
         return [list(lay) for lay in reversed(layers)]
 
 
+class Llist(Iterable[int]):
+    def __init__(self, next: Optional[Llist] = None, value: Optional[int] = None) -> None:
+        self.next = next
+        self.value = value
+
+    def add_this(self, x: int) -> Llist:
+        return Llist(self, x)
+
+    def __iter__(self) -> Iterator[int]:
+        node: Optional[Llist] = self
+        while node is not None and node.value is not None:
+            yield node.value
+            node = node.next
+
+    def __len__(self) -> int:
+        node: Optional[Llist] = self
+        i = 0
+        while node is not None and node.value is not None:
+            i += 1
+            node = node.next
+        return i
+
+
 class SugiyamaGraphDrawing:
     def __init__(
         self,
         remove_cycles: Optional[RemoveCycles] = None,
         layer_assignment: Optional[LayerAssignment] = None,
-        reuse_nodes: bool = True
+        reuse_dummy_nodes: bool = True,
+        bias_nodes: bool = True,
+        vertex_reordering: bool = True
     ) -> None:
         self._remove_cycles = RemoveCycleDFS() if remove_cycles is None else remove_cycles
         self._layer_assignment = LayerAssignmentCoffmanGraham(5, 1) \
             if layer_assignment is None \
             else layer_assignment
-        self.reuse_nodes = reuse_nodes
+        self.reuse_dummy_nodes = reuse_dummy_nodes
+        self._bias_nodes = bias_nodes
+        self._vertex_reordering = vertex_reordering
 
-    def _extend_layers(
+    def _extend_dummy_nodes_layers(
         self, g: Graph, layers: list[list[int]],
-        reuse_nodes: bool = False
+        reuse_dummy_nodes: bool = False
     ) -> tuple[Graph, list[list[int]], set[int], dict[tuple[int, int], list[int]]]:
         """
         This function takes a graph and its nodes ordered in layers, and adds dummy nodes
@@ -254,12 +292,12 @@ class SugiyamaGraphDrawing:
         4. The connections that were removed/replaced in the process (and their
            replacements)
         """
-        if reuse_nodes:
-            return self._extend_layers_reuse_nodes(g, layers)
+        if reuse_dummy_nodes:
+            return self._extend_dummy_nodes_layers_reuse_nodes(g, layers)
         else:
-            return self._extend_layers_simple(g, layers)
+            return self._extend_dummy_nodes_layers_simple(g, layers)
 
-    def _extend_layers_simple(
+    def _extend_dummy_nodes_layers_simple(
         self, g: Graph, layers: list[list[int]]
     ) -> tuple[Graph, list[list[int]], set[int], dict[tuple[int, int], list[int]]]:
         max_index = max(g.vertices)
@@ -296,10 +334,11 @@ class SugiyamaGraphDrawing:
         return Graph(g.vertices | new_nodes, edges_ext), layers_ext, new_nodes, edges_modified
 
     def _combine_dummy_nodes_backwards(
-        self, g: Graph, new_nodes: set[int], edges_ext: Edges, layers_ext: list[list[int]],
+        self, vertices: set[int], new_nodes: set[int],
+        edges_ext: Edges, layers_ext: list[list[int]],
         edges_modified: dict[tuple[int, int], list[int]]
     ) -> tuple[set[int], Edges, list[list[int]], dict[tuple[int, int], list[int]]]:
-        reversed_edges = Graph(g.vertices | new_nodes, edges_ext).reversed_edges
+        reversed_edges = Graph(vertices | new_nodes, edges_ext).reversed_edges
         layers_index = {v: layer_i
                         for layer_i, vs in enumerate(layers_ext)
                         for v in vs}
@@ -307,24 +346,25 @@ class SugiyamaGraphDrawing:
         reduced_edges_ext = {n: v.copy() for n, v in edges_ext.items()}
 
         to_del_nodes: dict[int, int] = {}
-        for v in g.vertices:
+        for v in vertices:
             ind_v = layers_index[v]
             prev_dummy = {w for w in reversed_edges[v]
-                          if w in new_nodes and layers_index[w] == ind_v - 1}
+                          if (w in new_nodes and layers_index[w] == ind_v - 1
+                              and len(reduced_edges_ext[w]) == 1)}
             i = 1
             while prev_dummy:
                 new_dummy = prev_dummy.pop()
                 for dummy in prev_dummy:
-                    if len(reduced_edges_ext[dummy]) == 1:
-                        for w in reversed_edges[dummy]:
-                            reduced_edges_ext[w].remove(dummy)
-                            reduced_edges_ext[w].add(new_dummy)
-                        to_del_nodes[dummy] = new_dummy
+                    for w in reversed_edges[dummy]:
+                        reduced_edges_ext[w].remove(dummy)
+                        reduced_edges_ext[w].add(new_dummy)
+                    to_del_nodes[dummy] = new_dummy
 
                 i += 1
                 prev_dummy = {w for v in prev_dummy
                               for w in reversed_edges[v]
-                              if w in new_nodes and layers_index[w] == ind_v - i}
+                              if (w in new_nodes and layers_index[w] == ind_v - i
+                                  and len(reduced_edges_ext[w]) == 1)}
 
         reduced_layers_ext = [lay[:] for lay in layers_ext]
         for v in to_del_nodes:
@@ -338,7 +378,7 @@ class SugiyamaGraphDrawing:
         return new_nodes - set(to_del_nodes), reduced_edges_ext, reduced_layers_ext, \
             edges_modified
 
-    def _extend_layers_reuse_nodes(
+    def _extend_dummy_nodes_layers_reuse_nodes(
         self, g: Graph, layers: list[list[int]]
     ) -> tuple[Graph, list[list[int]], set[int], dict[tuple[int, int], list[int]]]:
         max_index = max(g.vertices)
@@ -398,7 +438,7 @@ class SugiyamaGraphDrawing:
         # redundant dummy nodes backwards (starting at some node and going backwards)
         new_nodes, edges_ext, layers_ext, edges_modified_ = \
             self._combine_dummy_nodes_backwards(
-                g, new_nodes, edges_ext, layers_ext, edges_modified_)
+                g.vertices, new_nodes, edges_ext, layers_ext, edges_modified_)
 
         return Graph(g.vertices | new_nodes, edges_ext), \
             layers_ext, new_nodes, edges_modified_
@@ -436,12 +476,193 @@ class SugiyamaGraphDrawing:
                    for v, ws in graph.edges.items()}
         )
 
+    def _connected_nodes_in_list(self, graph: Graph, nodes: list[int]) -> dict[int, set[int]]:
+        this_nodes = set(nodes)
+        edges = graph.edges
+        reversed_edges = graph.reversed_edges
+        groups = {}
+        for n in nodes:
+            groups[n] = edges[n].intersection(this_nodes) \
+                | reversed_edges[n].intersection(this_nodes)
+            groups[n].add(n)
+        return groups
+
+    def _sort_layers_median(
+        self,
+        graph: Graph,
+        layers: list[list[int]],
+        direction: Literal[-1, 1],  # negative or positive direction
+        include_last: bool
+    ) -> list[list[int]]:
+        layers_ordered = [lay.copy() for lay in layers]
+        edges_prev = graph.edges if direction == 1 else graph.reversed_edges
+
+        start = 1 if direction == 1 else len(layers) - 2
+        end = len(layers) if direction == 1 else -1
+
+        prev_lay = layers_ordered[0] if direction == 1 else layers_ordered[-1]
+        if not include_last:
+            end = -direction
+        for lay in layers_ordered[start:end:direction]:
+            keys: dict[int, float] = {}
+
+            # Computing median of previous positions
+            for j, v in enumerate(lay):
+                prev_conn_pos = [i for i, w in enumerate(prev_lay) if v in edges_prev[w]]
+                if prev_conn_pos:
+                    keys[v] = statistics.median(prev_conn_pos)
+                else:
+                    keys[v] = j
+
+            # Checking if at least two nodes are connected to each other within the layer
+            groups = self._connected_nodes_in_list(graph, lay)
+            internal_connections = any(len(group) > 1 for group in groups.values())
+            if internal_connections:
+                new_keys = {}
+                pos = {v: i for i, v in enumerate(lay)}
+                for v, ws_in_group in groups.items():
+                    average = statistics.mean(keys[w] for w in ws_in_group)
+                    average_pos = statistics.mean(pos[w] for w in ws_in_group)
+                    new_keys[v] = (average, average_pos, keys[v])
+                keys = new_keys  # type: ignore
+
+            lay.sort(key=keys.__getitem__)
+            prev_lay = lay
+
+        return layers_ordered
+
+    def _shufle_layers(
+        self,
+        layers: list[list[int]],
+        inputs: bool,
+        outputs: bool
+    ) -> list[list[int]]:
+        from random import shuffle
+        layers = [lay.copy() for lay in layers]
+        start = 1 if inputs else 0
+        end = len(layers) - 2 if outputs else len(layers) - 1
+        for lay in layers[start:end]:
+            shuffle(lay)
+        return layers
+
+    def _vertex_ordering_stage(
+        self,
+        graph: Graph,
+        layers: list[list[int]],
+        inputs: bool,
+        outputs: bool
+    ) -> list[list[int]]:
+        # layers = self._shufle_layers(layers, inputs, outputs)
+        for i in range(3):
+            # i = 0
+            layers = self._sort_layers_median(
+                graph, layers,
+                direction=1 if i % 2 else -1,
+                include_last=not (outputs if i % 2 else inputs))
+        return layers
+
+    def _find_edges_modified_in_new_graph(
+        self,
+        graph: Graph,
+        graph_original: Graph
+    ) -> dict[tuple[int, int], list[int]]:
+        edges_modified: dict[tuple[int, int], list[int]] = {}
+
+        def dfs_helper(w: int, path: Llist) -> None:
+            # in case we have reached a non-dummy node
+            if w in graph_original.vertices:
+                if len(path):
+                    pathlist = list(path)
+                    pathlist.reverse()
+                    edges_modified[(v, w)] = pathlist
+                return
+
+            # general case
+            new_path = path.add_this(w)
+            for k in graph.edges[w]:
+                dfs_helper(k, new_path)
+
+        for v, ws in graph_original.edges.items():
+            for w in ws:
+                if w not in graph.edges[v] and (v, w) not in edges_modified:
+                    for k in graph.edges[v]:
+                        dfs_helper(k, Llist())
+                    assert (v, w) in edges_modified
+
+        return edges_modified
+
+    def _find_layers_index(self, layers: list[list[int]]) -> dict[int, tuple[int, int]]:
+        return {v: (layer_i, j)
+                for layer_i, vs in enumerate(layers)
+                for j, v in enumerate(vs)}
+
+    def _extra_layers_for_ease_of_visualization(
+        self,
+        graph: Graph,
+        graph_original: Graph,
+        layers: list[list[int]],
+        new_nodes: set[int],
+    ) -> tuple[Graph, list[list[int]], set[int], dict[tuple[int, int], list[int]]]:
+        new_graph = graph.deep_copy()
+        new_layers = [lay.copy() for lay in layers]
+        new2_nodes = new_nodes.copy()
+
+        new_index = max(graph.vertices) + 10
+        layers_index = self._find_layers_index(layers)
+
+        vertices_to_check = graph.vertices
+        while vertices_to_check:
+            v = vertices_to_check.pop()
+            if new_graph.degree(v) > 3:
+                num_subnodes = min(int(ceil(sqrt(new_graph.degree(v)))), 3)
+                lay_i, v_pos = layers_index[v]
+                new_lay: list[int] = []
+                new_layers.insert(lay_i + 1, new_lay)
+                for j, w in enumerate(new_layers[lay_i]):
+                    # Finding where each new node should point to
+                    if j == v_pos:
+                        to_add = num_subnodes
+                        ws_as_list = list(new_graph.edges[w])
+                        ws_as_list.sort(key=new_layers[lay_i + 2].index)
+                        per_chunk = int(ceil(len(ws_as_list) / num_subnodes))
+                        chunks = [set(ws_as_list[per_chunk*k:per_chunk*(k+1)])
+                                  for k in range(num_subnodes)]
+                    else:
+                        to_add = 1
+                        chunks = [new_graph.edges[w].copy()]
+
+                    # Creating new nodes for layer
+                    added: set[int] = set()
+                    for k in range(to_add):
+                        new_graph.vertices.add(new_index)
+                        new_graph.edges[new_index] = chunks[k]
+                        new_lay.append(new_index)
+                        added.add(new_index)
+
+                        new_index += 1
+                    new_graph.edges[w] = added
+
+                new2_nodes |= set(new_lay)
+                vertices_to_check |= set(new_lay)
+                layers_index |= self._find_layers_index(new_layers)
+
+        return new_graph, new_layers, new2_nodes, \
+            self._find_edges_modified_in_new_graph(new_graph, graph_original)
+
+    def _check_for_possible_inconsistencies(self) -> None:
+        if self.reuse_dummy_nodes and isinstance(self._remove_cycles, RemoveCycleDFS) \
+                and self._remove_cycles.reverse:
+            raise Exception("If you are reusing dummy nodes, it's not a good idea to allow "
+                            "discarded egdes in reverse")
+
     def find_pos(
         self,
         graph: Graph,
         inputs: Optional[list[int]] = None,
         outputs: Optional[list[int]] = None,
     ) -> GraphWithPos:
+        self._check_for_possible_inconsistencies()
+
         if inputs is None:
             inputs = []
         if outputs is None:
@@ -456,11 +677,15 @@ class SugiyamaGraphDrawing:
         # A positive bias will nudge the vertex to the last layers, a negative bias to the
         # first layers. Nodes connected to input nodes should be closer to the input. The
         # same goes for output nodes
-        bias = defaultdict(float, {w: -1.0 for v in inputs for w in graph.edges[v]})
-        for v in outputs:
-            for w in graph.reversed_edges[v]:
-                # if w is both in inputs and outputs, it should a bias of 0, otherwise 1
-                bias[w] = 0 if w in bias else 1
+        if self._bias_nodes:
+            bias = defaultdict(float, {w: -1.0 for v in inputs for w in graph.edges[v]})
+            for v in outputs:
+                for w in graph.reversed_edges[v]:
+                    # if w is both in inputs and outputs, it should a bias of 0, otherwise 1
+                    bias[w] = 0 if w in bias else 1
+        else:
+            bias = None
+
         layers = self._layer_assignment.assign(
             graph_no_cycles.subgraph(remove=set(inputs) | set(outputs)),
             bias=bias
@@ -471,10 +696,29 @@ class SugiyamaGraphDrawing:
             layers.insert(0, inputs)
         if outputs:
             layers.append(outputs)
-        # 2b. Extending layers to include dummy nodes for long distance edges
+        # 2b. Adding dummy nodes for long distance edges
         graph_extended, layers_extended, new_nodes, edges_modified = \
-            self._extend_layers(graph_no_cycles, layers, reuse_nodes=self.reuse_nodes)
+            self._extend_dummy_nodes_layers(graph_no_cycles, layers,
+                                            reuse_dummy_nodes=self.reuse_dummy_nodes)
 
+        # 3. Vertex ordering
+        if self._vertex_reordering:
+            layers_extended = self._vertex_ordering_stage(
+                graph_extended, layers_extended, inputs=bool(inputs), outputs=bool(outputs))
+        # Intermediate step. Adding extra layers for nodes with too many connections
+        graph_extended, layers_extended, new_nodes, edges_modified = \
+            self._extra_layers_for_ease_of_visualization(
+                graph_extended, graph_no_cycles, layers_extended, new_nodes)
+        # new_nodes, edges_extended, layers_extended, edges_modified = \
+        #     self._combine_dummy_nodes_backwards(
+        #         graph_extended.vertices - new_nodes, new_nodes, graph_extended.edges,
+        #         layers_extended, edges_modified)
+        # Repeating ordering after adding new nodes
+        if self._vertex_reordering:
+            layers_extended = self._vertex_ordering_stage(
+                graph_extended, layers_extended, inputs=bool(inputs), outputs=bool(outputs))
+
+        # Determining positions vertices and edges from graph data
         graph_with_pos = self._graph_with_pos_from_layers_extended(
             graph_no_cycles, layers_extended, new_nodes, edges_modified)
 

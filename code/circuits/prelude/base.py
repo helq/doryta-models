@@ -6,7 +6,7 @@ from ..sncircuit import SNCreate, LIF, SNCreateVisual
 from ..visualize.base import CircuitDisplay
 
 
-def asr_latch(heartbeat: float) -> SNCreate:
+def asr_latch(heartbeat: float, noQ: bool = False) -> SNCreate:
     inf = 2e20
     with SNCreate(
         neuron_type=LIF,
@@ -24,9 +24,15 @@ def asr_latch(heartbeat: float) -> SNCreate:
         snc.input("activate", synapses={"a": {"weight": 1.0}, "memory": {}})
         snc.input("set",      synapses={"memory": {}})
         snc.input("reset",    synapses={"memory": {"weight": 1.0}})
-        snc.neuron("a", synapses={"memory": {}, "q": {}})
-        snc.neuron("memory", params={"resistance": inf}, synapses={"q": {}})
+        snc.neuron("a", synapses={"memory", "q"})
+        snc.neuron("memory", params={"resistance": inf}, synapses={"q"})
         snc.neuron("q")
+
+        if noQ:
+            snc.output("no-q")
+            snc.neuron("no-q")
+            snc.connection("a", "no-q", synapse_params={"delay": 2})
+            snc.connection("memory", "no-q", synapse_params={})
 
     return snc
 
@@ -460,6 +466,48 @@ def counter_register_visual(snc: SNCreate, depth: int = 0) -> SNCreateVisual:
     visual.def_outputs([(width, 4 + 0.3 * n_bits + 0.3*i) for i in range(n_bits)])
 
     return visual
+
+
+def bus(  # noqa: C901
+    heartbeat: float,
+    n_bits: int = 8,
+    output_pieces: int = 1
+) -> SNCreate:
+    assert n_bits > 1
+    with SNCreate(
+        neuron_type=LIF,
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 0.5, "delay": 1}
+    ) as snc:
+        asr_latch_val = asr_latch(heartbeat, noQ=True)
+        for j in range(output_pieces):
+            for i in range(n_bits):
+                snc.output(f"select-{j}-{i}-q")
+            for i in range(n_bits):
+                snc.output(f"select-{j}-{i}-no-q")
+
+        snc.input("read", inputs=[f"Latch_{i}.activate" for i in range(n_bits)])
+        snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(n_bits)])
+        for j in range(output_pieces):
+            snc.input("select-0",
+                      synapses=({f'select-{j}-{i}-q' for i in range(n_bits)}
+                                | {f'select-{j}-{i}-no-q' for i in range(n_bits)}))
+        for i in range(n_bits):
+            snc.input(f"set_{i}", inputs=[f"Latch_{i}.set"])
+
+        for j in range(output_pieces):
+            for i in range(n_bits):
+                snc.neuron(f"select-{j}-{i}-q")
+            for i in range(n_bits):
+                snc.neuron(f"select-{j}-{i}-no-q")
+            for i in range(n_bits):
+                snc.connection(f"Latch_{i}.q", f"select-{j}-{i}-q", synapse_params={})
+                snc.connection(f"Latch_{i}.no-q", f"select-{j}-{i}-no-q", synapse_params={})
+
+        for i in range(n_bits):
+            snc.include(f"Latch_{i}", asr_latch_val.circuit)
+
+    return snc
 
 
 if __name__ == '__main__':

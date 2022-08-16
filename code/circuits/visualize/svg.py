@@ -68,7 +68,8 @@ def _insert_circuit_in_drawing(
             line = dwg.polyline(points=points)
             dummy_nodes |= set(in_between_positions)
         line.set_markers((None, None, '#arrow-head'))
-        circuit_group.add(line2)
+        if not print_dummy:
+            circuit_group.add(line2)
         circuit_group.add(line)
 
     if print_dummy:

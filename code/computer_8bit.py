@@ -282,7 +282,7 @@ if False and __name__ == '__main__':
 
 
 # One byte memory
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     heartbeat = 1/100
 
     # test with:
@@ -332,7 +332,7 @@ if True and __name__ == '__main__':
     )
 
 
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     ht = 1/8
     byte_visual2 = base.multi_latch_visual(base.multi_latch(ht, 8), depth=0).generate()
     save_svg(byte_visual2, dump_folder / 'svgs' / "byte_latch.svg", 30)
@@ -344,7 +344,7 @@ if True and __name__ == '__main__':
     save_svg(asr_visual, dump_folder / 'svgs' / "asr_latch.svg", 30)
 
     save_svg(base.RAM_visual(base.RAM(ht, 1), byte_visual2).generate(),
-             dump_folder / 'svgs' / "RAM.svg", 30)
+             dump_folder / 'svgs' / "RAM.svg", 30, print_dummy=True)
 
     register_visual = base.counter_register_visual(base.counter_register(ht, 8), depth=1).generate()
     save_svg(register_visual, dump_folder / 'svgs' / "counter_register.svg", 30)
@@ -357,7 +357,7 @@ if True and __name__ == '__main__':
         remove_cycles=positioning.RemoveCycleDFS(reverse=True),
         layer_assignment=positioning.LayerAssignmentCoffmanGraham(
             w=3, crossings_in_layer=1),
-        reuse_nodes=True
+        reuse_dummy_nodes=False
     )
     fulladder_visual = SNCreateVisual(base.full_adder(ht), graph_drawing).generate(mode='auto')
     save_svg(fulladder_visual, dump_folder / 'svgs' / "fulladder-auto2.svg", 30,
@@ -368,3 +368,29 @@ if True and __name__ == '__main__':
 
     asr_visual = SNCreateVisual(base.asr_latch(ht), graph_drawing).generate(mode='auto')
     save_svg(asr_visual, dump_folder / 'svgs' / "asr_latch-auto.svg", 30)
+
+if False and __name__ == '__main__':
+    ht = 1/100
+    size = 8
+    bus = base.bus(ht, size, output_pieces=1)
+    ram = base.RAM(ht, 4)
+
+    graph_drawing = positioning.SugiyamaGraphDrawing(
+        remove_cycles=positioning.RemoveCycleDFS(reverse=False),
+        layer_assignment=positioning.LayerAssignmentCoffmanGraham(
+            w=32, crossings_in_layer=0),
+        reuse_dummy_nodes=True,
+        bias_nodes=True,
+        vertex_reordering=True
+    )
+
+    bus_snvisual = SNCreateVisual(bus, graph_drawing)
+    bus_snvisual.set_graph_drawing_params(x_axis_zoom=1.5, input_output_sep=3.5)
+    bus_visual = bus_snvisual.generate(mode='auto')
+    save_svg(bus_visual, dump_folder / 'svgs' / "bus-auto.svg", 30, print_dummy=True)
+
+    # This takes some time as it is huuuge! (like half a minute)
+    ram_snvisual = SNCreateVisual(ram, graph_drawing)
+    ram_snvisual.set_graph_drawing_params(input_output_sep=5.0)
+    ram_visual = ram_snvisual.generate(mode='auto')
+    save_svg(ram_visual, dump_folder / 'svgs' / "RAM-16-auto.svg", 30, print_dummy=True)
