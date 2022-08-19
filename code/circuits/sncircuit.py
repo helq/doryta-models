@@ -872,11 +872,11 @@ class SNCreateVisual:
     def _get_graph_drawing(self) -> positioning.SugiyamaGraphDrawing:
         if self._graph_drawing is None:
             return positioning.SugiyamaGraphDrawing(
-                remove_cycles=positioning.RemoveCycleDFS(reverse=True),
+                remove_cycles=positioning.RemoveCycleDFS(reverse=False),
                 layer_assignment=positioning.LayerAssignmentCoffmanGraham(
                     w=2, crossings_in_layer=1
                 ),
-                reuse_dummy_nodes=False
+                reuse_dummy_nodes=True
             )
         return self._graph_drawing
 

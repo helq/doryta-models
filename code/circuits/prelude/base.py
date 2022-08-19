@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from math import log
+from typing import Literal
 
 from ..sncircuit import SNCreate, LIF, SNCreateVisual
 from ..visualize.base import CircuitDisplay
@@ -468,46 +469,73 @@ def counter_register_visual(snc: SNCreate, depth: int = 0) -> SNCreateVisual:
     return visual
 
 
+ASRType = Literal['q', 'no-q', 'both']
+
+
 def bus(  # noqa: C901
     heartbeat: float,
     n_bits: int = 8,
-    output_pieces: int = 1
-) -> SNCreate:
+    output_pieces: dict[str, ASRType] | None = None
+) -> tuple[SNCreate, dict[str, list[int]]]:
+    """
+    This function uses way too many loops, I know, everything could be done in a single
+    loop (or two), but order does matter! unless you don't care much about it<F5>
+    """
     assert n_bits > 1
+    if output_pieces is None:
+        output_pieces = {}
     with SNCreate(
         neuron_type=LIF,
         neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
         synapse_params={"weight": 0.5, "delay": 1}
     ) as snc:
         asr_latch_val = asr_latch(heartbeat, noQ=True)
-        for j in range(output_pieces):
-            for i in range(n_bits):
-                snc.output(f"select-{j}-{i}-q")
-            for i in range(n_bits):
-                snc.output(f"select-{j}-{i}-no-q")
 
+        # Defining output of circuit
+        for j, (name, type) in enumerate(output_pieces.items()):
+            if type in {'q', 'both'}:
+                for i in range(n_bits):
+                    snc.output(f"{name}-{i}-q")
+            if type in {'no-q', 'both'}:
+                for i in range(n_bits):
+                    snc.output(f"{name}-{i}-no-q")
+
+        # Defining input of circuit
         snc.input("read", inputs=[f"Latch_{i}.activate" for i in range(n_bits)])
+        for name, type in output_pieces.items():
+            synapses = set()
+            if type in {'q', 'both'}:
+                synapses |= {f'{name}-{i}-q' for i in range(n_bits)}
+            if type in {'no-q', 'both'}:
+                synapses |= {f'{name}-{i}-no-q' for i in range(n_bits)}
+            snc.input(name, synapses=synapses)
         snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(n_bits)])
-        for j in range(output_pieces):
-            snc.input("select-0",
-                      synapses=({f'select-{j}-{i}-q' for i in range(n_bits)}
-                                | {f'select-{j}-{i}-no-q' for i in range(n_bits)}))
+
         for i in range(n_bits):
             snc.input(f"set_{i}", inputs=[f"Latch_{i}.set"])
 
-        for j in range(output_pieces):
+        # Defining new neurons and connections
+        for name, type in output_pieces.items():
             for i in range(n_bits):
-                snc.neuron(f"select-{j}-{i}-q")
-            for i in range(n_bits):
-                snc.neuron(f"select-{j}-{i}-no-q")
-            for i in range(n_bits):
-                snc.connection(f"Latch_{i}.q", f"select-{j}-{i}-q", synapse_params={})
-                snc.connection(f"Latch_{i}.no-q", f"select-{j}-{i}-no-q", synapse_params={})
+                if type in {'both', 'q'}:
+                    snc.neuron(f"{name}-{i}-q")
+                    snc.connection(f"Latch_{i}.q", f"{name}-{i}-q", synapse_params={})
+                if type in {'both', 'no-q'}:
+                    snc.neuron(f"{name}-{i}-no-q")
+                    snc.connection(f"Latch_{i}.no-q", f"{name}-{i}-no-q", synapse_params={})
 
+        # including ASR latches
         for i in range(n_bits):
             snc.include(f"Latch_{i}", asr_latch_val.circuit)
 
-    return snc
+    outputs = {}
+    i = 0
+    for name, type in output_pieces.items():
+        shift = 2 * n_bits if type == 'both' else n_bits
+        outputs[name] = list(range(i, i + shift))
+        i += shift
+
+    return snc, outputs
 
 
 if __name__ == '__main__':
