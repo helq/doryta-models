@@ -18,6 +18,12 @@ dump_folder = pathlib.Path('snn-circuits/')
 if False and __name__ == '__main__':
     heartbeat = 1/8
 
+    # test with:
+    # > src/doryta \
+    # > --load-model=../data/models/snn-circuits/snn-models/byte_latch.doryta.bin \
+    # > --load-spikes=../data/models/snn-circuits/spikes/byte_latch.bin --probe-firing \
+    # > --output-dir=testing-8-bit/byte_latch --save-state --end=20
+
     save(base.byte_latch(heartbeat).circuit,
          dump_folder / 'snn-models' / 'byte_latch.doryta.bin',
          heartbeat=heartbeat, verbose=True)
@@ -281,7 +287,7 @@ if False and __name__ == '__main__':
                            individual_spikes=spikes)
 
 
-# One byte memory
+# Testing one byte register and counter up
 if False and __name__ == '__main__':
     heartbeat = 1/100
 
@@ -398,8 +404,48 @@ if False and __name__ == '__main__':
     save_svg(ram_visual, dump_folder / 'svgs' / "RAM-16-auto.svg", 30, print_dummy=True)
 
 
-if False and __name__ == '__main__':
-    ht = 1/100
+# Testing bus
+if True and __name__ == '__main__':
+    ht = 1/256
     size = 8
+
+    # test with:
+    # > src/doryta \
+    # > --load-model=../data/models/snn-circuits/snn-models/bus.doryta.bin \
+    # > --load-spikes=../data/models/snn-circuits/spikes/bus.bin --probe-firing \
+    # > --output-dir=testing-8-bit/bus --save-state --end=20
+
+    # Notice that a real bus should be reset once it sends data forward on one of its
+    # outputs. This is not a problem that I should care about right now
     bus, outputs = base.bus(ht, size, output_pieces={'ram': 'both', 'reg-a': 'q'})
-    print(outputs)
+    save(bus.circuit,
+         dump_folder / 'snn-models' / 'bus.doryta.bin',
+         heartbeat=ht, verbose=True)
+    n_inputs = len(bus.circuit.inputs)
+    print({k: [i + n_inputs for i in outs] for k, outs in outputs.items()})
+
+    # Spikes to bus
+    # Time   Inputs         ouputs
+    # 1      SET 00100111
+    # 2      READ RAM       11011000 00100111 (outputs 10-25)
+    # 3      SET 00000000
+    # 4      READ RAM       11111111 00000000 (outputs 10-25)
+    # 5      SET 11001111
+    # 6      READ REG_A     11001111          (outputs 26-33)
+    spikes = {
+        # read ram
+        0: np.array([2, 4]),
+        # read reg-a
+        1: np.array([6]),
+        # set byte
+        2: np.array([1, 5]),
+        3: np.array([1, 5]),
+        4: np.array([1, 5]),
+        5: np.array([5]),
+        6: np.array([]),
+        7: np.array([1]),
+        8: np.array([5]),
+        9: np.array([5]),
+    }
+
+    save_spikes_for_doryta(dump_folder / 'spikes' / 'bus', individual_spikes=spikes)

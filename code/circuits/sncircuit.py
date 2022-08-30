@@ -314,7 +314,7 @@ class SNCreate:
 
     def input(self, name: str,
               synapses: Optional[dict[str, dict[str, int | float]] | set[str]] = None,
-              inputs: Optional[Iterable[str]] = None) -> None:
+              inputs: set[str] | list[str] | None = None) -> None:
         assert self.__circuit is None
 
         if reserved_ids_re.match(name) is not None:

@@ -501,20 +501,23 @@ def bus(  # noqa: C901
                     snc.output(f"{name}-{i}-no-q")
 
         # Defining input of circuit
-        snc.input("read", inputs=[f"Latch_{i}.activate" for i in range(n_bits)])
+        activate_inputs = [f"Latch_{i}.activate" for i in range(n_bits)]
+        reset_inputs = [f"Latch_{i}.reset" for i in range(n_bits)]
         for name, type in output_pieces.items():
-            synapses = set()
+            synapses: dict[str, dict[str, float]] = \
+                {"reset-neuron": {"weight": 1.0, "delay": 2}}
             if type in {'q', 'both'}:
-                synapses |= {f'{name}-{i}-q' for i in range(n_bits)}
+                synapses |= {f'{name}-{i}-q': {'delay': 3} for i in range(n_bits)}
             if type in {'no-q', 'both'}:
-                synapses |= {f'{name}-{i}-no-q' for i in range(n_bits)}
-            snc.input(name, synapses=synapses)
-        snc.input("reset", inputs=[f"Latch_{i}.reset" for i in range(n_bits)])
+                synapses |= {f'{name}-{i}-no-q': {'delay': 4} for i in range(n_bits)}
+            snc.input(name, synapses=synapses, inputs=activate_inputs)
+        # snc.input("reset", inputs=reset_inputs)
 
         for i in range(n_bits):
             snc.input(f"set_{i}", inputs=[f"Latch_{i}.set"])
 
         # Defining new neurons and connections
+        snc.neuron("reset-neuron", to_inputs=reset_inputs)
         for name, type in output_pieces.items():
             for i in range(n_bits):
                 if type in {'both', 'q'}:

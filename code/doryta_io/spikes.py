@@ -58,13 +58,13 @@ def save_spikes_for_doryta(
 
 
 if __name__ == '__main__':
-    img = np.array([  # type: ignore
+    img = np.array([
         [1, 1, 0, 0, 0],
         [0, 1, 0, 0, 0],
         [0, 0, 0, 1, 0],
     ], dtype=int)
 
-    times = np.array([0.1, 0.2, 0.52])  # type: ignore
+    times = np.array([0.1, 0.2, 0.52])
     save_spikes_for_doryta("five-neurons-spikes", img, times)
 
     save_spikes_for_doryta(
