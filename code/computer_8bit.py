@@ -239,7 +239,7 @@ if False and __name__ == '__main__':
 
 # Testing byte adder
 if False and __name__ == '__main__':
-    heartbeat = 1/100
+    heartbeat = 1/256
 
     # test with:
     # > src/doryta \
@@ -405,7 +405,7 @@ if False and __name__ == '__main__':
 
 
 # Testing bus
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     ht = 1/256
     size = 8
 
@@ -449,3 +449,70 @@ if True and __name__ == '__main__':
     }
 
     save_spikes_for_doryta(dump_folder / 'spikes' / 'bus', individual_spikes=spikes)
+
+
+# Testing ALU, register A and B
+if True and __name__ == '__main__':
+    ht = 1/256
+    n_bits = 8
+
+    # test with:
+    # > src/doryta \
+    # > --load-model=../data/models/snn-circuits/snn-models/gluing_ALU.doryta.bin \
+    # > --load-spikes=../data/models/snn-circuits/spikes/gluing_ALU.bin --probe-firing \
+    # > --output-dir=testing-8-bit/gluing_ALU --save-state --end=20
+
+    glued_ALU = base.glued_ALU(ht, n_bits)
+
+    # print(snc.circuit)
+    save(glued_ALU.circuit,
+         dump_folder / 'snn-models' / 'gluing_ALU.doryta.bin',
+         heartbeat=ht, verbose=True)
+
+    # Spike sequence
+    # time    instruction           output
+    # 1       LOAD A  00100111
+    # 2       READ A                00100111 (outputs 21-28)
+    # 3       LOAD B  00100010
+    # 4       ACTIVATE ALU
+    # 5       READ A                01001001 (outputs 21-28)
+    # 6       LOAD B  10110110
+    # 7       ACTIVATE ALU
+    # 8       READ A                11111111 (outputs 21-28)
+    # 9       LOAD B  00000001
+    # 10      ACTIVATE ALU
+    # 11      READ A                00000000 (outputs 21-28)
+    spikes = {
+        # activate ALU
+        0: np.array([4, 7, 10]),
+        # Register A
+        #   read/send BUS
+        1: np.array([2, 5, 8, 11]),
+        #   reset
+        2: np.array([]),
+        #   set byte
+        3: np.array([1]),
+        4: np.array([1]),
+        5: np.array([1]),
+        6: np.array([]),
+        7: np.array([]),
+        8: np.array([1]),
+        9: np.array([]),
+        10: np.array([]),
+        # Register B
+        #   reset
+        11: np.array([6, 9]),
+        #   set byte
+        12: np.array([9 + ht]),
+        13: np.array([3, 6 + ht]),
+        14: np.array([6 + ht]),
+        15: np.array([]),
+        16: np.array([6 + ht]),
+        17: np.array([3, 6 + ht]),
+        18: np.array([]),
+        19: np.array([6 + ht]),
+    }
+
+    # save_svg(gluing_visual.generate(), dump_folder / 'svgs' / "gluing_ALU.svg", 20,
+    #          print_dummy=True)
+    save_spikes_for_doryta(dump_folder / 'spikes' / 'gluing_ALU', individual_spikes=spikes)

@@ -472,25 +472,36 @@ def counter_register_visual(snc: SNCreate, depth: int = 0) -> SNCreateVisual:
 ASRType = Literal['q', 'no-q', 'both']
 
 
+# This function uses way too many loops, I know, everything could be done in a single loop
+# (or two), but order does matter! unless you don't care much about it
 def bus(  # noqa: C901
     heartbeat: float,
     n_bits: int = 8,
-    output_pieces: dict[str, ASRType] | None = None
+    output_pieces: dict[str, ASRType] | None = None,
+    clear_after_sending: bool = True
 ) -> tuple[SNCreate, dict[str, list[int]]]:
     """
-    This function uses way too many loops, I know, everything could be done in a single
-    loop (or two), but order does matter! unless you don't care much about it<F5>
+    This function extends a multi latch with the ability to send its content to one of
+    multiple destination instead of just reading from it (it has multiple outputs).
+
+    Params:
+    - `output_pieces`: indicates the number of outputs and their types (q: contents of the
+      register, no-q: the inverse of the contents of the multilatch, or, both)
+    - `clear_after_sending`: if true, it will clear the value contained in the multilatch
+      after it is accessed
     """
     assert n_bits > 1
     if output_pieces is None:
         output_pieces = {}
+
+    is_noQ_present = any(t != 'q' for t in output_pieces.values())
+    asr_latch_val = asr_latch(heartbeat, noQ=is_noQ_present)
+
     with SNCreate(
         neuron_type=LIF,
         neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
         synapse_params={"weight": 0.5, "delay": 1}
     ) as snc:
-        asr_latch_val = asr_latch(heartbeat, noQ=True)
-
         # Defining output of circuit
         for j, (name, type) in enumerate(output_pieces.items()):
             if type in {'q', 'both'}:
@@ -503,26 +514,32 @@ def bus(  # noqa: C901
         # Defining input of circuit
         activate_inputs = [f"Latch_{i}.activate" for i in range(n_bits)]
         reset_inputs = [f"Latch_{i}.reset" for i in range(n_bits)]
+        synapses_base = {} if not clear_after_sending else \
+            {"reset-neuron": {"weight": 1.0, "delay": 2}}
+        delay_q = 4 if is_noQ_present else 3
         for name, type in output_pieces.items():
-            synapses: dict[str, dict[str, float]] = \
-                {"reset-neuron": {"weight": 1.0, "delay": 2}}
+            synapses = synapses_base.copy()
             if type in {'q', 'both'}:
-                synapses |= {f'{name}-{i}-q': {'delay': 3} for i in range(n_bits)}
+                synapses |= {f'{name}-{i}-q': {'delay': delay_q} for i in range(n_bits)}
             if type in {'no-q', 'both'}:
                 synapses |= {f'{name}-{i}-no-q': {'delay': 4} for i in range(n_bits)}
             snc.input(name, synapses=synapses, inputs=activate_inputs)
-        # snc.input("reset", inputs=reset_inputs)
+        if not clear_after_sending:
+            snc.input("reset", inputs=reset_inputs)
 
         for i in range(n_bits):
             snc.input(f"set_{i}", inputs=[f"Latch_{i}.set"])
 
         # Defining new neurons and connections
-        snc.neuron("reset-neuron", to_inputs=reset_inputs)
+        if clear_after_sending:
+            snc.neuron("reset-neuron", to_inputs=reset_inputs)
+        delay_q = 2 if is_noQ_present else 1
         for name, type in output_pieces.items():
             for i in range(n_bits):
                 if type in {'both', 'q'}:
                     snc.neuron(f"{name}-{i}-q")
-                    snc.connection(f"Latch_{i}.q", f"{name}-{i}-q", synapse_params={})
+                    snc.connection(f"Latch_{i}.q", f"{name}-{i}-q",
+                                   synapse_params={'delay': delay_q})
                 if type in {'both', 'no-q'}:
                     snc.neuron(f"{name}-{i}-no-q")
                     snc.connection(f"Latch_{i}.no-q", f"{name}-{i}-no-q", synapse_params={})
@@ -539,6 +556,77 @@ def bus(  # noqa: C901
         i += shift
 
     return snc, outputs
+
+
+def glued_ALU(heartbeat: float, n_bits: int = 8) -> SNCreate:
+    """
+    Glued ALU consists of: two registers (A and B; each with own set and reset inputs), an
+    ALU activation input, and one output (the value contained in A).
+    """
+    # Define register A (a variation of register with additional connections, similar to BUS)
+    regA, regA_outs = bus(heartbeat, n_bits=n_bits,
+                          output_pieces={'alu': 'q', 'bus': 'q'},
+                          clear_after_sending=False)
+    # Define register B, a simple byte of memory that feeds to ALU
+    regB = byte_latch(heartbeat, n_bits)
+    # Load ALU
+    alu = multi_bit_adder(heartbeat, n_bits)
+
+    # connecting all pieces
+    with SNCreate(
+        neuron_type=LIF,
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 1.0, "delay": 1}
+    ) as snc:
+        # Define inputs
+        snc.input("regA-alu", inputs=["Register-A.alu"], synapses={'delay-ALU-conn'})
+        snc.input("regA-bus", inputs=["Register-A.bus"])
+        snc.input("regA-reset", inputs=["Register-A.reset"])
+        for i in range(n_bits):
+            snc.input(f"regA-set_{i}", inputs=[f"Register-A.set_{i}"])
+        # snc.input("regB-alu", inputs=["Register-B.read"])
+        snc.input("regB-reset", inputs=["Register-B.reset"])
+        for i in range(n_bits):
+            snc.input(f"regB-set_{i}", inputs=[f"Register-B.set_{i}"])
+
+        # Define outputs (only register A)
+        for i, out_i in enumerate(regA_outs['bus']):
+            snc.output(f"Register-A.out_{out_i}")
+            # snc.output({f"Register-A.out_{out_i}", f"ALU.out_{i}"})
+
+        # Define connections between circuits
+        for i, out_i in enumerate(regA_outs['alu']):
+            # - Register A to ALU
+            snc.connection(f'Register-A.out_{out_i}', f'ALU.in0-{i}')
+        for i in range(n_bits):
+            # - Register B to ALU
+            snc.connection(f'Register-B.out_{i}', f'ALU.in1-{i}')
+            # - ALU to Register A
+            snc.connection(f'ALU.out_{i}', f'Register-A.set_{i}')
+
+        # Additional neurons to coordinate components interaction
+        snc.neuron('delay-ALU-conn', to_inputs=['Register-B.read'],
+                   synapses={'delay2-ALU-conn'})
+        snc.neuron('delay2-ALU-conn', to_inputs=['Register-A.reset'])
+
+        # Including circuits
+        snc.include("Register-A", regA.circuit)
+        snc.include("Register-B", regB.circuit)
+        snc.include("ALU", alu.circuit)
+
+    # regB_visual = SNCreateVisual(regB).generate()
+    # regA_visual = SNCreateVisual(regA).generate()
+    # alu_visual = SNCreateVisual(alu).generate()
+    # gluing_visual = SNCreateVisual(snc)
+    # gluing_visual.include_visual('Register-A', regA_visual)
+    # gluing_visual.include_visual('Register-B', regB_visual)
+    # gluing_visual.include_visual('ALU', alu_visual)
+    # gluing_visual.def_include_pos('Register-A', (4, 1))
+    # gluing_visual.def_include_pos('Register-B', (4, 18))
+    # gluing_visual.def_include_pos('ALU', (20, 1))
+    # gluing_visual.def_size(30, 30)
+
+    return snc
 
 
 if __name__ == '__main__':
