@@ -10,6 +10,7 @@ from .circuits.prelude import base
 from .circuits.visualize.svg import save_svg
 from .circuits.visualize import positioning
 from .circuits.sncircuit import SNCreateVisual
+# from .circuits import sncircuit
 
 dump_folder = pathlib.Path('snn-circuits/')
 
@@ -452,7 +453,7 @@ if False and __name__ == '__main__':
 
 
 # Testing ALU, register A and B
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     ht = 1/256
     n_bits = 8
 
@@ -516,3 +517,102 @@ if True and __name__ == '__main__':
     # save_svg(gluing_visual.generate(), dump_folder / 'svgs' / "gluing_ALU.svg", 20,
     #          print_dummy=True)
     save_spikes_for_doryta(dump_folder / 'spikes' / 'gluing_ALU', individual_spikes=spikes)
+
+
+# Testing all components (except for CPU) by hand
+if True and __name__ == '__main__':  # noqa: C901
+    # test with:
+    # > src/doryta --spike-driven \
+    # > --load-model=../data/models/snn-circuits/snn-models/all-glued-but-cpu.doryta.bin \
+    # > --load-spikes=../data/models/snn-circuits/spikes/all-glued-but-cpu.bin --probe-firing \
+    # > --output-dir=testing-8-bit/all-glued-but-cpu --save-state --end=20
+
+    ht = 1/256
+    n_bits = 8
+    ram_addr_bits = 4
+
+    all_glued_but_CPU = base.all_glued_but_CPU(ht, n_bits, ram_addr_bits)
+
+    save(all_glued_but_CPU.circuit,
+         dump_folder / 'snn-models' / 'all-glued-but-cpu.doryta.bin',
+         heartbeat=ht, verbose=True)
+
+    # creating spikes
+    # time  operation+data                    output
+    #            1. Load value to counter (from BUS)
+    #            2. Increase counter
+    #            3. Output counter value (using BUS)
+    # 1     WRITE 000000 00001011 (in bus)
+    # 1.5   ACTIVATE   bus-reg-counter
+    # 2     ACTIVATE   counter-count-up
+    # 3     ACTIVATE   counter-read
+    # 3.5   ACTIVATE   bus-output-circuit     0000 00001100
+    # 3.8   RESET      counter
+    #            4. load data to RAM (two bytes, addr 04 and 07)
+    # 4     WRITE 000100 01000001 (in bus)
+    # 4.2   ACTIVATE   bus-ram
+    # 4.4   WRITE 000111 11101001 (in bus)
+    # 4.6   ACTIVATE   bus-ram
+    #            5. move data addr 04 to register A
+    # 5     WRITE 010100 00000000 (in bus)
+    # 5.2   ACTIVATE   bus-ram
+    # 5.4   ACTIVATE   bus-reg-a
+    #            6. move data from addr 07 to register B
+    # 6     WRITE 010111 00000000 (in bus)
+    # 6.2   ACTIVATE   bus-ram
+    # 6.4   ACTIVATE   bus-reg-b
+    #            7. activate glued_ALU
+    # 7     ACTIVATE   glued_alu-alu
+    #            8. copy register A to output
+    # 8     ACTIVATE   glued_alu-regA-bus
+    # 8.5   ACTIVATE   bus-output-circuit  (expected output 000000 00101010)
+    spikes = {
+        # BUS
+        # bus-ram
+        0: np.array([4.2, 4.6, 5.2, 6.2]),
+        # bus-reg-a
+        1: np.array([5.4]),
+        # bus-reg-b
+        2: np.array([6.4]),
+        # bus-reg-counter
+        3: np.array([1.5]),
+        # bus-cpu
+        4: np.array([]),
+        # bus-output-circuit
+        5: np.array([3.5, 8.5]),
+        # bus-set 0 to 7
+        6: np.array([1, 4, 4.4]),
+        7: np.array([1]),
+        8: np.array([]),
+        9: np.array([1, 4.4]),
+        10: np.array([]),
+        11: np.array([4.4]),
+        12: np.array([4, 4.4]),
+        13: np.array([4.4]),
+        # bus-set 8 to 11
+        14: np.array([4.4, 6]),
+        15: np.array([4.4, 6]),
+        16: np.array([1, 4, 4.4, 5, 6]),
+        17: np.array([]),
+        18: np.array([5, 6]),
+        19: np.array([]),
+        # Counter
+        # counter-read
+        20: np.array([3]),
+        # counter-reset
+        21: np.array([3.8]),
+        # counter-count-up
+        22: np.array([2]),
+        # Glued_ALU
+        # glued_alu-alu
+        23: np.array([7]),
+        # glued_alu-regA-bus
+        24: np.array([8]),
+        # glued_alu-regA-reset
+        25: np.array([]),
+        # glued_alu-regB-reset
+        26: np.array([]),
+    }
+
+    save_spikes_for_doryta(dump_folder / 'spikes' / 'all-glued-but-cpu',
+                           individual_spikes=spikes)

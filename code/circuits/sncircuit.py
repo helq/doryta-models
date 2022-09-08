@@ -86,6 +86,10 @@ class SNCircuit(NamedTuple):
     def num_neurons(self) -> int:
         return len(self.neurons)
 
+    @property
+    def inputs_id_list(self) -> list[str]:
+        return [x for x, y in sorted(self.inputs_id.items(), key=lambda x: x[1])]
+
     def check_correct_input_id(self, input: int) -> None:
         if not (0 <= input < len(self.inputs)):
             raise Exception(

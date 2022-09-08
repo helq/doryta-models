@@ -551,9 +551,11 @@ def bus(  # noqa: C901
     outputs = {}
     i = 0
     for name, type in output_pieces.items():
-        shift = 2 * n_bits if type == 'both' else n_bits
-        outputs[name] = list(range(i, i + shift))
-        i += shift
+        outputs[name] = list(range(i, i + n_bits))
+        i += n_bits
+        if type == 'both':
+            outputs[f'{name}-no-q'] = list(range(i, i + n_bits))
+            i += n_bits
 
     return snc, outputs
 
@@ -579,7 +581,7 @@ def glued_ALU(heartbeat: float, n_bits: int = 8) -> SNCreate:
         synapse_params={"weight": 1.0, "delay": 1}
     ) as snc:
         # Define inputs
-        snc.input("regA-alu", inputs=["Register-A.alu"], synapses={'delay-ALU-conn'})
+        snc.input("alu", inputs=["Register-A.alu"], synapses={'delay-ALU-conn'})
         snc.input("regA-bus", inputs=["Register-A.bus"])
         snc.input("regA-reset", inputs=["Register-A.reset"])
         for i in range(n_bits):
@@ -625,6 +627,91 @@ def glued_ALU(heartbeat: float, n_bits: int = 8) -> SNCreate:
     # gluing_visual.def_include_pos('Register-B', (4, 18))
     # gluing_visual.def_include_pos('ALU', (20, 1))
     # gluing_visual.def_size(30, 30)
+
+    return snc
+
+
+def all_glued_but_CPU(  # noqa: C901
+    heartbeat: float, n_bits: int = 8, ram_addr_bits: int = 4
+) -> SNCreate:
+    # Load glued-ALU
+    glued_ALU_ = glued_ALU(heartbeat, n_bits)
+    # Load BUS (five output connections, to: RAM, register A, register B, counter up, and output)
+    #   The BUS is not of size `n_bits` because it also contains the address (when asking
+    #   for an address to RAM) and extra bits to be used for each unit as they please.
+    #   For the RAM, the first extra bit is for read and the second is for reset
+    bus_, bus_outputs = bus(
+        heartbeat,
+        n_bits + ram_addr_bits + 2,
+        output_pieces={
+            'ram': 'both',
+            'reg-a': 'q',
+            'reg-b': 'q',
+            'reg-counter': 'q',
+            'cpu': 'q',
+            'output-circuit': 'q',
+        })
+    # Load RAM and counter up register
+    ram = RAM(heartbeat, depth=ram_addr_bits)
+    # Load counter register
+    counter = counter_register(heartbeat, ram_addr_bits)
+
+    # connecting all pieces
+    with SNCreate(
+        neuron_type=LIF,
+        neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+        synapse_params={"weight": 1.5, "delay": 1}
+    ) as snc:
+        # glue together RAM, BUS, ALU, Register A and B, and Counter Register
+        # Inputs:
+        #   - BUS set, activation and redirection bits
+        #   - counter count-up, read and reset
+        #   - read, reset and activate (alu) for glued-ALU
+        for circuit_name, input_list in [
+                ('BUS', bus_.circuit.inputs_id_list),
+                ('Counter', ['read', 'reset', 'count-up']),
+                ('Glued_ALU', ['alu', 'regA-bus', 'regA-reset', 'regB-reset']),
+        ]:
+            for input_name in input_list:
+                snc.input(f'{circuit_name.lower()}-{input_name}',
+                          inputs=[f'{circuit_name}.{input_name}'])
+        # Outputs:
+        #   - BUS to output connection
+        for out_i in bus_outputs['output-circuit']:
+            snc.output(f'BUS.out_{out_i}')
+
+        # Connect BUS to all four of its components and assign output as output of the whole circuit
+        #   - Connecting BUS to Counter and back
+        for i, out_i in enumerate(bus_outputs['reg-counter'][:ram_addr_bits]):
+            snc.connection(f'BUS.out_{out_i}', f'Counter.set_{i}')
+            snc.connection(f'Counter.out_{i}', f'BUS.set_{i}')
+        #   - Connecting BUS to RAM and back
+        for i, out_i in enumerate(bus_outputs['ram'][:n_bits]):
+            snc.connection(f'BUS.out_{out_i}', f'RAM.set_{i}')
+            snc.connection(f'RAM.out_{i}', f'BUS.set_{i}')
+        for i, (add_i, nadd_i) in enumerate(
+            zip(bus_outputs['ram'][n_bits:n_bits+ram_addr_bits],
+                bus_outputs['ram-no-q'][n_bits:])):
+            snc.connection(f'BUS.out_{add_i}', f'RAM.addr_{i}')
+            snc.connection(f'BUS.out_{nadd_i}', f'RAM.naddr_{i}')
+        for out_i, name in zip(bus_outputs['ram'][-2:], ['read', 'reset']):
+            snc.connection(f'BUS.out_{out_i}', f'RAM.{name}')
+        #   - Connecting BUS to Reg-A and back
+        for i, out_i in enumerate(bus_outputs['reg-a'][:n_bits]):
+            snc.connection(f'BUS.out_{out_i}', f'Glued_ALU.regA-set_{i}')
+            snc.connection(f'Glued_ALU.out_{i}', f'BUS.set_{i}')
+        #   - Connecting BUS to Reg-B
+        for i, out_i in enumerate(bus_outputs['reg-b'][:n_bits]):
+            snc.connection(f'BUS.out_{out_i}', f'Glued_ALU.regB-set_{i}')
+
+        # Including parts
+        for circuit_name, circuit in [
+                ('BUS', bus_.circuit),
+                ('RAM', ram.circuit),
+                ('Counter', counter.circuit),
+                ('Glued_ALU', glued_ALU_.circuit),
+        ]:
+            snc.include(circuit_name, circuit)
 
     return snc
 
