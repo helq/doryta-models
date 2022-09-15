@@ -201,7 +201,7 @@ class ModelSaverLayers(object):
     def all_connections(self) -> List[NeuralConnection]:
         return list(chain(*(group.connections for group in self.neuron_group)))
 
-    def check_at_least_one_group(self, input_size: int, msg: str) -> None:
+    def _check_at_least_one_group(self, input_size: int, msg: str) -> None:
         if len(self.neuron_group) > 0 and self.neuron_group[-1].number != input_size:
             raise Exception("The number of input neurons (last layer) "
                             f"{self.neuron_group[-1].number} does not coincide with "
@@ -435,7 +435,7 @@ class ModelSaverLayers(object):
                             f"Their shapes are {weights.shape} and {thresholds.shape}"
                             " for weights and thresholds, respectively.")
 
-        self.check_at_least_one_group(
+        self._check_at_least_one_group(
             weights.shape[0], "equal to the first dimension of weights")
 
         if np.any(thresholds <= 0):
@@ -476,7 +476,7 @@ class ModelSaverLayers(object):
                             f"filters. {filters} filters and {threshold.size} threshold "
                             "size were given")
 
-        self.check_at_least_one_group(
+        self._check_at_least_one_group(
             input_neurons, "equal to: input_height * input_width * channnels")
 
         # This convolution connection is only used to compute the output size
@@ -512,7 +512,7 @@ class ModelSaverLayers(object):
         striding: Tuple[int, int]
     ) -> None:
         input_neurons = input_size[0] * input_size[1] * input_size[2]
-        self.check_at_least_one_group(
+        self._check_at_least_one_group(
             input_neurons, "equal to: input_height * input_width * channnels")
 
         channels = input_size[2]
@@ -721,7 +721,7 @@ class ModelSaverLayers(object):
 
         for i, group in enumerate(self.neuron_group):
             thresholds = group.thresholds
-            assert(group.number == thresholds.shape[0])
+            assert group.number == thresholds.shape[0]
 
             last = i + 1 == len(self.neuron_group)
             # Saving for each neuron neuron
@@ -799,7 +799,7 @@ class ModelSaverLayers(object):
         #   (Only synapses for Fully Connected layers are stored!)
         #  N x neuron:
         for i, group in enumerate(self.neuron_group):
-            assert(group.number == group.thresholds.shape[0])
+            assert group.number == group.thresholds.shape[0]
 
             # For each neuron, saving
             #  - Neuron params
@@ -831,14 +831,14 @@ class ModelSaverLayers(object):
 if __name__ == '__main__':
     dump_folder = Path('various/snn-models/')
 
-    w = np.array([[1,  0],  # type: ignore
+    w = np.array([[1,  0],
                   [2, -1],
                   [1,  1]])
-    b = np.array([.5, 1])  # type: ignore
+    b = np.array([.5, 1])
 
-    w1 = np.array([[-1, 1, 0, -2, 1],  # type: ignore
+    w1 = np.array([[-1, 1, 0, -2, 1],
                    [4, -5, 0, 3, 0]])
-    b1 = np.array([0, 0, 1, 0, 4])  # type: ignore
+    b1 = np.array([0, 0, 1, 0, 4])
 
     msaver = ModelSaverLayers()
     msaver.add_fully_layer(w, b + 0.5)
@@ -852,12 +852,12 @@ if __name__ == '__main__':
     k1[..., 0, 1] = [[1, 1, 1],
                      [1, 0, 1],
                      [1, 1, 1]]
-    t1 = np.array([2.5, 3.5])  # type: ignore
+    t1 = np.array([2.5, 3.5])
 
     k2 = np.zeros((1, 1, 2, 1))
     k2[..., 0, 0] = [[1]]
     k2[..., 1, 0] = [[-1]]
-    t2 = np.array([.5])  # type: ignore
+    t2 = np.array([.5])
 
     msaver = ModelSaverLayers()
     msaver.add_conv2d_layer(k1, t1, (20, 20), (1, 1), (1, 1))

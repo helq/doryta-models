@@ -3,7 +3,8 @@ from __future__ import annotations
 from math import log
 from typing import Literal
 
-from ..sncircuit import SNCreate, LIF, SNCreateVisual
+from ..sncircuit import SNCreate, LIF
+from ..snvisualize import SNCreateVisual
 from ..visualize.base import CircuitDisplay
 
 
@@ -677,7 +678,7 @@ def all_glued_but_CPU(  # noqa: C901
                           inputs=[f'{circuit_name}.{input_name}'])
         # Outputs:
         #   - BUS to output connection
-        for out_i in bus_outputs['output-circuit']:
+        for out_i in bus_outputs['output-circuit'][:n_bits]:
             snc.output(f'BUS.out_{out_i}')
 
         # Connect BUS to all four of its components and assign output as output of the whole circuit

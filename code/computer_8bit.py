@@ -9,8 +9,8 @@ from .doryta_io.spikes import save_spikes_for_doryta
 from .circuits.prelude import base
 from .circuits.visualize.svg import save_svg
 from .circuits.visualize import positioning
-from .circuits.sncircuit import SNCreateVisual
-# from .circuits import sncircuit
+from .circuits.snvisualize import SNCreateVisual
+from .circuits import sncircuit
 
 dump_folder = pathlib.Path('snn-circuits/')
 
@@ -520,7 +520,7 @@ if False and __name__ == '__main__':
 
 
 # Testing all components (except for CPU) by hand
-if True and __name__ == '__main__':  # noqa: C901
+if True and __name__ == '__main__':
     # test with:
     # > src/doryta --spike-driven \
     # > --load-model=../data/models/snn-circuits/snn-models/all-glued-but-cpu.doryta.bin \
@@ -533,7 +533,7 @@ if True and __name__ == '__main__':  # noqa: C901
 
     all_glued_but_CPU = base.all_glued_but_CPU(ht, n_bits, ram_addr_bits)
 
-    save(all_glued_but_CPU.circuit,
+    save(all_glued_but_CPU.circuit.remove_unneded_neurons(),
          dump_folder / 'snn-models' / 'all-glued-but-cpu.doryta.bin',
          heartbeat=ht, verbose=True)
 
@@ -616,3 +616,40 @@ if True and __name__ == '__main__':  # noqa: C901
 
     save_spikes_for_doryta(dump_folder / 'spikes' / 'all-glued-but-cpu',
                            individual_spikes=spikes)
+
+
+if False and __name__ == '__main__':
+    # test with:
+    # > src/doryta --spike-driven \
+    # > --load-model=../data/models/snn-circuits/snn-models/all-glued-but-cpu.doryta.bin \
+    # > --load-spikes=../data/models/snn-circuits/spikes/all-glued-but-cpu.bin --probe-firing \
+    # > --output-dir=testing-8-bit/all-glued-but-cpu --save-state --end=20
+
+    ht = 1/256
+    n_bits = 8
+    ram_addr_bits = 4
+
+    all_glued_but_CPU = base.all_glued_but_CPU(ht, n_bits, ram_addr_bits)
+
+    graph_drawing = positioning.SugiyamaGraphDrawing(
+        remove_cycles=positioning.RemoveCycleDFS(reverse=False),
+        layer_assignment=positioning.LayerAssignmentCoffmanGraham(
+            w=100, crossings_in_layer=0),
+        reuse_dummy_nodes=True,
+        bias_nodes=True,
+        vertex_reordering=True
+    )
+
+    with sncircuit.SNCreate(neuron_type=sncircuit.LIF, neuron_params={},
+                            synapse_params={}) as snc:
+        for inp in all_glued_but_CPU.circuit.inputs_id:
+            snc.input(inp, inputs=[f"Glued.{inp}"])
+        for out_i in range(len(all_glued_but_CPU.circuit.outputs)):
+            snc.output(f"Glued.out_{out_i}")
+        snc.include("Glued", all_glued_but_CPU.circuit)
+
+    glued_snvisual = SNCreateVisual(snc, graph_drawing)
+    # glued_snvisual.set_graph_drawing_params(x_axis_zoom=1.5, input_output_sep=3.5)
+    glued_visual = glued_snvisual.generate(mode='auto')
+    save_svg(glued_visual, dump_folder / 'svgs' / "all_glued_but_CPU-auto.svg", 30,
+             print_dummy=True)
