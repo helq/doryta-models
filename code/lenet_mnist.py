@@ -7,6 +7,7 @@ import os
 # import sys
 import numpy as np
 # import struct
+from enum import Enum
 
 # import matplotlib.pyplot as plt
 
@@ -20,7 +21,7 @@ from tensorflow.keras import Model
 from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
 from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger
 
-from .doryta_io.model_saver import ModelSaverLayers
+from .doryta_io.model_saver import ModelSaverLayers, LIFPassThruParams
 from .doryta_io.spikes import save_spikes_for_doryta
 from .utils.common_mnist import my_key, load_data, keras_model_path, doryta_model_path
 from .utils.temp_encoding import img_to_tempencoding
@@ -85,6 +86,12 @@ def load_models(path: Union[str, pathlib.Path]) -> Tuple[Any, Any]:
     return model, model_intermediate
 
 
+class NNMode(Enum):
+    REGULAR = 0
+    TEMPORAL = 1
+    PIECES = 2
+
+
 if __name__ == '__main__':  # noqa: C901
     parser = argparse.ArgumentParser()
     parser.add_argument('--fashion', action=argparse.BooleanOptionalAction,
@@ -113,9 +120,9 @@ if __name__ == '__main__':  # noqa: C901
     initializer = 'glorot_uniform'
     # initializer = RandomUniform(minval=0.0, maxval=1.0)
 
-    temporal_encoding = False
+    nn_mode = NNMode.PIECES
 
-    checking_model = True
+    checking_model = False
 
     (x_train, y_train), (x_test, y_test) = load_data(dataset)
     x_train = x_train.reshape((-1, 28, 28, 1))
@@ -155,14 +162,14 @@ if __name__ == '__main__':  # noqa: C901
             print("Evaluating model (loss, accuracy):", model.evaluate(x_test, y_test))
             # new model allows us to extract the results of a layer
 
-            imgs = (x_test > .5).astype(float)  # type: ignore
+            imgs = (x_test > .5).astype(float)
             prediction = model.predict(imgs).argmax(axis=1)
             correct_predictions = (prediction == y_test.argmax(axis=1)).sum()
             print("Evaluating model (accuracy on black&white images):",
                   correct_predictions / imgs.shape[0])
 
         if saving_model:
-            if not temporal_encoding:
+            if nn_mode == NNMode.REGULAR:
                 msaver = ModelSaverLayers()
                 k1, t1 = model.layers[0].get_weights()  # conv2d
                 k2, t2 = model.layers[3].get_weights()  # conv2d
@@ -179,7 +186,7 @@ if __name__ == '__main__':  # noqa: C901
                 msaver.add_fully_layer(w5, .5 - t5)
                 msaver.save(doryta_model_path /
                             f"lenet-{dataset}-filters={filters[0]},{filters[1]}.doryta.bin")
-            else:
+            if nn_mode == NNMode.TEMPORAL:
                 msaver = ModelSaverLayers(dt=1/256)
                 k1, t1 = model.layers[0].get_weights()  # conv2d
                 k2, t2 = model.layers[3].get_weights()  # conv2d
@@ -215,9 +222,46 @@ if __name__ == '__main__':  # noqa: C901
                 msaver.save(doryta_model_path /
                             f"lenet-{dataset}-tempencode-R={R}-"
                             f"filters={filters[0]},{filters[1]}.doryta.bin")
+            if nn_mode == NNMode.PIECES:
+                msaver = ModelSaverLayers(neuron_type=LIFPassThruParams)
+                k1, t1 = model.layers[0].get_weights()  # conv2d
+                k2, t2 = model.layers[3].get_weights()  # conv2d
+                w3, t3 = model.layers[7].get_weights()  # fully
+                w4, t4 = model.layers[9].get_weights()  # fully
+                w5, t5 = model.layers[11].get_weights()  # fully
+                w3 = w3.reshape((5, 5, filters[1], 120)).transpose((2, 0, 1, 3)).reshape((-1, 120))
+                msaver.add_conv2d_layer(k1, .5 - t1, (28, 28), padding=(2, 2))
+                msaver.add_maxpool_layer((28, 28, filters[0]), (2, 2))
+                msaver.add_conv2d_layer(k2, .5 - t2, (14, 14))
+                msaver.add_maxpool_layer((10, 10, filters[1]), (2, 2))
+                id_maxpool2 = len(msaver.neuron_group) - 1
+
+                # Fully 1
+                msaver.add_neuron_group(.5 - t3, partitions=2)
+                id_fully1 = len(msaver.neuron_group) - 1
+                msaver.add_all2all_conn(from_=id_maxpool2, to=id_fully1, weights=w3)
+
+                # Fully 2
+                msaver.add_neuron_group(np.ones((t4.shape[0] * 2,)), partitions=2,
+                                        args={'passthru': True})
+                id_fully2_part1 = len(msaver.neuron_group) - 1
+                msaver.add_all2all_conn(from_=(id_fully1, 0), to=(id_fully2_part1, 0),
+                                        weights=w4[:60])
+                msaver.add_all2all_conn(from_=(id_fully1, 1), to=(id_fully2_part1, 1),
+                                        weights=w4[60:])
+
+                msaver.add_neuron_group(.5 - t4)
+                id_fully2_part2 = len(msaver.neuron_group) - 1
+                msaver.add_conv2d_conn(np.ones((2, 1)), (2, 84), from_=id_fully2_part1,
+                                       to=id_fully2_part2)
+
+                # Fully 3
+                msaver.add_fully_layer(w5, .5 - t5)
+                msaver.save(doryta_model_path / 'pieces' /
+                            f"lenet-{dataset}-filters={filters[0]},{filters[1]}-pieces.doryta.bin")
 
     # Saving one (or many) images (TEMPORAL ENCODING)
-    if False and temporal_encoding:
+    if False and nn_mode == NNMode.TEMPORAL:
         # interval = slice(0, 1)
         # interval = slice(0, 3)
         interval = slice(0, 100)
@@ -250,7 +294,7 @@ if __name__ == '__main__':  # noqa: C901
         print("Classes of images:", klass)
 
     # Saving all images using (TEMPORAL ENCODING)
-    if False and temporal_encoding:
+    if False and nn_mode == NNMode.TEMPORAL:
         cuts = [.01, 0.2, 0.3, 0.4, 0.5]
         # cuts = [.5]  # This should coincide with Keras output
 

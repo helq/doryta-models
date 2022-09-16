@@ -145,7 +145,7 @@ class Conv2DConn(NeuralConnection):
             f"output_size={self.output_size})"
 
 
-class NeuronParams(NamedTuple):
+class LIFParams(NamedTuple):
     """
     These parameters are given for an array of `number` neurons. The group of neurons
     should be breakable into a number of `partitions` (all of the same size).
@@ -190,9 +190,96 @@ class NeuronParams(NamedTuple):
     def partition_size(self) -> int:
         return self.number // self.partitions
 
+    #  - Neuron params:
+    #    + float potential = 0;          // V
+    #    + float current = 0;            // I(t)
+    #    + float resting_potential = 0;  // V_e
+    #    + float reset_potential = 0;    // V_r
+    #    + float threshold = 0.5 + bias; // V_th
+    #    + float tau_m = dt = 1/256;     // C * R
+    #    + float resistance = 1;         // R
+    def save_to_file(self, f: BinaryIO, i: int) -> None:
+        for param in ['potential', 'current', 'resting_potential', 'reset_potential',
+                      'thresholds', 'tau', 'resistance']:
+            f.write(struct.pack('>f', self.get_value(param, i)))
+
+
+class LIFPassThruParams(NamedTuple):
+    """
+    These parameters are given for an array of `number` neurons. The group of neurons
+    should be breakable into a number of `partitions` (all of the same size).
+
+    The passthru paramater forces the neuron to pass-on its current potential state as a
+    spike regardless if it reached the threshold or not. It resets after this.
+    """
+    number: int
+    partitions: int
+    connections: List[NeuralConnection]
+    thresholds: NDArray[Any]
+    # The parameters below can be passed as a dictionary args
+    tau:        Union[float, NDArray[Any]]
+    resistance: Union[float, NDArray[Any]] = 1.0
+    potential:  Union[float, NDArray[Any]] = 0.0
+    current:    Union[float, NDArray[Any]] = 0.0
+    resting_potential: Union[float, NDArray[Any]] = 0.0
+    reset_potential:   Union[float, NDArray[Any]] = 0.0
+    passthru: bool = False
+
+    def are_parameters_consistent(self) -> bool:
+        # partitions should be precise
+        assert self.number % self.partitions == 0
+        assert isinstance(self.passthru, bool)
+
+        for param_name in ['tau', 'resistance', 'potential', 'current',
+                           'resting_potential', 'reset_potential']:
+            param = getattr(self, param_name)
+            if isinstance(param, numbers.Number):
+                continue
+            else:
+                assert isinstance(param, np.ndarray)
+                if param.shape != (self.number,):
+                    return False
+        return True
+
+    def get_value(self, param_name: str, pos: int) -> float:
+        param = getattr(self, param_name)
+        if isinstance(param, numbers.Number):
+            return param  # type: ignore
+        elif isinstance(param, np.ndarray):
+            return param[pos]  # type: ignore
+        raise Exception("Parameters can only be float's or ndarrays, but"
+                        f" `{type(param)}` was given.")
+
+    @property
+    def partition_size(self) -> int:
+        return self.number // self.partitions
+
+    #  - Neuron params:
+    #    + float potential = 0;          // V
+    #    + float current = 0;            // I(t)
+    #    + float resting_potential = 0;  // V_e
+    #    + float reset_potential = 0;    // V_r
+    #    + float threshold = 0.5 + bias; // V_th
+    #    + float tau_m = dt = 1/256;     // C * R
+    #    + float resistance = 1;         // R
+    def save_to_file(self, f: BinaryIO, i: int) -> None:
+        for param in ['potential', 'current', 'resting_potential', 'reset_potential',
+                      'thresholds', 'tau', 'resistance']:
+            f.write(struct.pack('>f', self.get_value(param, i)))
+        f.write(struct.pack('b', bool(self.passthru)))
+
+
+NeuronParams = LIFParams | LIFPassThruParams
+
 
 class ModelSaverLayers(object):
-    def __init__(self, dt: float = 1/256, initial_threshold: float = .5) -> None:
+    def __init__(
+        self,
+        dt: float = 1/256,
+        initial_threshold: float = .5,
+        neuron_type: type[NeuronParams] = LIFParams
+    ) -> None:
+        self.neuron_type: type[NeuronParams] = neuron_type
         self.neuron_group: List[NeuronParams] = []
         self.dt = dt
         self.initial_threshold = initial_threshold
@@ -238,7 +325,7 @@ class ModelSaverLayers(object):
             args['tau'] = self.dt
 
         num_neurons = thresholds.shape[0]
-        nparams = NeuronParams(num_neurons, partitions, thresholds=thresholds, **args)
+        nparams = self.neuron_type(num_neurons, partitions, thresholds=thresholds, **args)
         if nparams.are_parameters_consistent():
             self.neuron_group.append(nparams)
         else:
@@ -247,32 +334,24 @@ class ModelSaverLayers(object):
 
     def add_all2all_conn(
         self,
-        from_: int,
-        to: int,
+        from_: int | tuple[int, int],
+        to: int | tuple[int, int],
         weights: NDArray[Any]
     ) -> None:
-        num_neuron_groups = len(self.neuron_group)
-        assert len(weights.shape) == 2
-        if from_ < 0 or to < 0 \
-                or num_neuron_groups <= from_ \
-                or num_neuron_groups <= to:
-            raise Exception(f"`from_` and `to` must be inside the range [0, {num_neuron_groups}]. "
-                            f"But `from_ = {from_}` and `to = {to}`")
+        from_start, from_end, num_neurons_in_from, input_neuron_group = \
+            self.__find_start_end_for_neuron_group(from_)
+        to_start, to_end, num_neurons_in_to, _ = \
+            self.__find_start_end_for_neuron_group(to)
 
-        num_neurons_in_from = self.neuron_group[from_].number
-        num_neurons_in_to = self.neuron_group[to].number
         if weights.shape != (num_neurons_in_from, num_neurons_in_to):
             raise Exception(f"The shape of the weights {weights.shape} does not coincide with "
                             f"the number of output neurons ({num_neurons_in_from}) "
                             f"and the number of input neurons ({num_neurons_in_to})")
 
         all2all_conn = All2AllConn(weights)
-        from_start = sum(self.neuron_group[i].number for i in range(from_))
-        from_end = from_start + num_neurons_in_from - 1
-        to_start = sum(self.neuron_group[i].number for i in range(to))
-        to_end = to_start + num_neurons_in_to - 1
         all2all_conn.set_from_and_to((from_start, from_end), (to_start, to_end))
 
+        from_ = from_[0] if isinstance(from_, tuple) else from_
         self.neuron_group[from_].connections.append(all2all_conn)
 
     def add_one2all_conn(
@@ -340,8 +419,8 @@ class ModelSaverLayers(object):
         self.neuron_group[from_layer].connections.append(all2all_conn)
 
     def __find_start_end_for_neuron_group(
-        self, neuron_group_id: Union[int, Tuple[int, int]]
-    ) -> Tuple[int, int, int, NeuronParams]:
+        self, neuron_group_id: int | tuple[int, int]
+    ) -> tuple[int, int, int, NeuronParams]:
         """
         Given a neuron group id (either a single `int` (neuron group number) or tuple of
         `int`s (neuron group number and partition number)), this function returns:
@@ -400,11 +479,11 @@ class ModelSaverLayers(object):
     def add_conv2d_conn(
         self,
         kernel: NDArray[Any],
-        input_size: Tuple[int, int],
-        from_: Union[int, Tuple[int, int]],
-        to: Union[int, Tuple[int, int]],
-        padding: Tuple[int, int] = (0, 0),
-        striding: Tuple[int, int] = (1, 1)
+        input_size: tuple[int, int],
+        from_: int | tuple[int, int],
+        to: int | tuple[int, int],
+        padding: tuple[int, int] = (0, 0),
+        striding: tuple[int, int] = (1, 1)
     ) -> None:
         # check that kernel is 2 dimensions
         assert len(kernel.shape) == 2
@@ -618,7 +697,7 @@ class ModelSaverLayers(object):
                         input_layer, (last_layer, snc_neuron_id), synap_params.weight)
 
         # Defining connections for each synapse between the SN-circuit neurons
-        for neuron_id, neuron_params in snc.neurons.items():
+        for neuron_id, neuron_params in enumerate(snc.neurons):
             for to_neuron_id, synap_params in neuron_params.synapses.items():
                 assert synap_params.delay == 1, "The binary format only allows for delay = 1"
                 self.add_one2one_conn(
@@ -631,28 +710,6 @@ class ModelSaverLayers(object):
         else:  # isinstance(group_id, tuple)
             return self.neuron_group[group_id[0]].partition_size == 1
 
-    #  - Neuron params:
-    #    + float potential = 0;          // V
-    #    + float current = 0;            // I(t)
-    #    + float resting_potential = 0;  // V_e
-    #    + float reset_potential = 0;    // V_r
-    #    + float threshold = 0.5 + bias; // V_th
-    #    + float tau_m = dt = 1/256;     // C * R
-    #    + float resistance = 1;         // R
-    def _save_neuron_params(
-        self,
-        f: BinaryIO,
-        i: int,
-        params: NeuronParams
-    ) -> None:
-        f.write(struct.pack('>f', params.get_value('potential', i)))          # potential
-        f.write(struct.pack('>f', params.get_value('current', i)))            # current
-        f.write(struct.pack('>f', params.get_value('resting_potential', i)))  # resting_potential
-        f.write(struct.pack('>f', params.get_value('reset_potential', i)))    # reset_potential
-        f.write(struct.pack('>f', params.thresholds[i]))                      # threshold
-        f.write(struct.pack('>f', params.get_value('tau', i)))                # tau_m
-        f.write(struct.pack('>f', params.get_value('resistance', i)))         # resistance
-
     def save(self, path: Union[str, Path], version: Optional[int] = None) -> None:
         if not self.neuron_group:
             raise Exception("Nothing to do. No layers defined")
@@ -660,7 +717,8 @@ class ModelSaverLayers(object):
         all_connections = self.all_connections
 
         if version is None:
-            if all(isinstance(conn, All2AllConn) for conn in all_connections):
+            if all(isinstance(conn, All2AllConn) for conn in all_connections) \
+                    and self.neuron_type == LIFParams:
                 version = 1
             else:
                 version = 2
@@ -668,13 +726,15 @@ class ModelSaverLayers(object):
         if version == 1:
             if not all(isinstance(conn, All2AllConn) for conn in all_connections):
                 raise Exception("Version 1 can only save All2AllConn on layers")
+            if self.neuron_type != LIFParams:
+                raise Exception("Version 1 can only save networks with the vanilla LIF neuron type")
             with open(path, 'wb') as fh:
                 self.save_v1(fh)
         elif version == 2:
             with open(path, 'wb') as fh:
-                self.save_v2(fh)
+                self.save_v2plus(fh)
         else:
-            raise Exception("There is no such thing as 'version = {version}'")
+            raise Exception(f"There is no such thing as 'version = {version}'")
 
     def save_v1(self, fh: BinaryIO) -> None:
         all_connections = self.all_connections
@@ -730,7 +790,7 @@ class ModelSaverLayers(object):
             #  - M x synapses
             for j in range(group.number):
                 # Neuron params
-                self._save_neuron_params(fh, j, group)
+                group.save_to_file(fh, j)
 
                 if last:
                     # number of synapses per neuron
@@ -746,13 +806,18 @@ class ModelSaverLayers(object):
                     # synapses
                     conn.weights[j].astype('>f4').tofile(fh)
 
-    def save_v2(self, fh: BinaryIO) -> None:
+    def save_v2plus(self, fh: BinaryIO) -> None:  # noqa: C901
         all_connections = self.all_connections
 
         # -- Magic number
         fh.write(struct.pack('>I', 0x23432BC4))
         # -- File format
-        fh.write(struct.pack('>H', 0x2))
+        if self.neuron_type == LIFParams:
+            fh.write(struct.pack('>H', 0x2))
+        if self.neuron_type == LIFPassThruParams:
+            fh.write(struct.pack('>H', 0x32))
+        else:
+            raise Exception(f"Unknown neuron type {type(self.neuron_type)}")
         # -- Total number of neurons (N)
         fh.write(struct.pack('>i', self.total_neurons))
         # -- Total number of groups
@@ -810,7 +875,7 @@ class ModelSaverLayers(object):
             for j in range(group.number):
                 neuron_id += 1
                 # Neuron params
-                self._save_neuron_params(fh, j, group)
+                group.save_to_file(fh, j)
 
                 total_fully_conn_for_neuron = \
                     sum(1 for conn in group.connections

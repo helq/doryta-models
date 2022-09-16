@@ -34,8 +34,8 @@ from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
 # from .whetstone.callbacks import SimpleSharpener, WhetstoneLogger, AdaptiveSharpener
 from .whetstone.callbacks import WhetstoneLogger, AdaptiveSharpener
 
-from .utils.doryta.model_saver import ModelSaverLayers
-from .utils.doryta.spikes import save_spikes_for_doryta
+from .doryta_io.model_saver import ModelSaverLayers
+from .doryta_io.spikes import save_spikes_for_doryta
 from .utils.temp_encoding import img_to_tempencoding
 from .utils.common_mnist import my_key, plot_img, load_data, keras_model_path, doryta_model_path
 
@@ -87,7 +87,7 @@ def save_spikes_for_doryta_legacy(
     format: int = 2,
     shift: float = 0.0
 ) -> None:
-    assert(len(img.shape) == 2)
+    assert len(img.shape) == 2
     # assert(img.shape[1] == 28*28)
     with open(f"{path}.bin", 'wb') as fh:
         # Magic number
@@ -275,7 +275,7 @@ if __name__ == '__main__':  # noqa: C901
             print("Evaluating model (loss, accuracy):", model.evaluate(x_test, y_test))
             # new model allows us to extract the results of a layer
 
-            imgs = (x_test > .5).astype(float)  # type: ignore
+            imgs = (x_test > .5).astype(float)
             prediction = model.predict(imgs).argmax(axis=1)
             correct_predictions = (prediction == y_test.argmax(axis=1)).sum()
             print("Evaluating model (accuracy on black&white images):",
