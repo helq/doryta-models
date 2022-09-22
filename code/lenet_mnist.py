@@ -8,6 +8,7 @@ import os
 import numpy as np
 # import struct
 from enum import Enum
+import json
 
 # import matplotlib.pyplot as plt
 
@@ -257,8 +258,32 @@ if __name__ == '__main__':  # noqa: C901
 
                 # Fully 3
                 msaver.add_fully_layer(w5, .5 - t5)
-                msaver.save(doryta_model_path / 'pieces' /
-                            f"lenet-{dataset}-filters={filters[0]},{filters[1]}-pieces.doryta.bin")
+
+                basename = f"lenet-{dataset}-filters={filters[0]},{filters[1]}-pieces"
+                msaver.save(doryta_model_path / 'pieces' / f"{basename}.doryta.bin")
+
+                groups = [
+                    {'size': ng.number,
+                     'partitions': ng.partitions,
+                     'connections': [
+                         {'type': con.__class__.__name__,
+                          'from': con.from_,
+                          'to': con.to,
+                          'input_shape': con.input_shape,
+                          'output_shape': con.output_shape}
+                         for con in ng.connections
+                     ]}
+                    for ng in msaver.neuron_group]
+                total = 0
+                for ng in groups:
+                    start = total
+                    total += ng['size']  # type: ignore
+                    ng['start'] = start
+                    ng['stop'] = total - 1
+
+                with open(doryta_model_path / 'pieces' /
+                          f"{basename}.doryta.neuron-group.json", 'w') as outfile:
+                    json.dump(groups, outfile)
 
     # Saving one (or many) images (TEMPORAL ENCODING)
     if False and nn_mode == NNMode.TEMPORAL:

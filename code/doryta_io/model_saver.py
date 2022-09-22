@@ -48,6 +48,16 @@ class NeuralConnection(ABC):
     def conn_type(self) -> int:
         ...
 
+    @property
+    @abstractmethod
+    def input_shape(self) -> tuple[int, ...]:
+        ...
+
+    @property
+    @abstractmethod
+    def output_shape(self) -> tuple[int, ...]:
+        ...
+
 
 class All2AllConn(NeuralConnection):
     """
@@ -85,6 +95,16 @@ class All2AllConn(NeuralConnection):
 
     def __repr__(self) -> str:
         return f"All2AllConn(from_={self.from_}, to={self.to}, weights={self.weights})"
+
+    @property
+    def input_shape(self) -> tuple[int, ...]:
+        assert len(self.weights.shape) == 2
+        return self.weights.shape[:1]
+
+    @property
+    def output_shape(self) -> tuple[int, ...]:
+        assert len(self.weights.shape) == 2
+        return self.weights.shape[1:]
 
 
 class Conv2DConn(NeuralConnection):
@@ -143,6 +163,14 @@ class Conv2DConn(NeuralConnection):
             f"input_size={self.input_size}, " \
             f"striding={self.striding}, " \
             f"output_size={self.output_size})"
+
+    @property
+    def input_shape(self) -> tuple[int, ...]:
+        return self.input_size
+
+    @property
+    def output_shape(self) -> tuple[int, ...]:
+        return self.output_size
 
 
 class LIFParams(NamedTuple):
