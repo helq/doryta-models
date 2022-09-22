@@ -309,7 +309,7 @@ class SNCircuit(NamedTuple):
 
         # Build new circuit with only connected neurons
         return SNCircuit(
-            outputs=[frozenset(out & reduced) for out in self.outputs],
+            outputs=[frozenset(new_ids[n] for n in (out & reduced)) for out in self.outputs],
             inputs=[{new_ids[n]: syns for n, syns in inp.items() if n in reduced}
                     for inp in self.inputs],
             neurons=[neu for i, neu in sorted(neurons.items())],

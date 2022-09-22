@@ -453,7 +453,7 @@ if False and __name__ == '__main__':
 
 
 # Testing ALU, register A and B
-if False and __name__ == '__main__':
+if True and __name__ == '__main__':
     ht = 1/256
     n_bits = 8
 
@@ -476,19 +476,22 @@ if False and __name__ == '__main__':
     # 2       READ A                00100111 (outputs 21-28)
     # 3       LOAD B  00100010
     # 4       ACTIVATE ALU
-    # 5       READ A                01001001 (outputs 21-28)
-    # 6       LOAD B  10110110
-    # 7       ACTIVATE ALU
-    # 8       READ A                11111111 (outputs 21-28)
-    # 9       LOAD B  00000001
-    # 10      ACTIVATE ALU
-    # 11      READ A                00000000 (outputs 21-28)
+    # 5       READ FLAGBIT          0 (output 29)
+    # 6       READ A                01001001 (outputs 21-28)
+    # 7       LOAD B  10110110
+    # 8       ACTIVATE ALU
+    # 9       READ FLAGBIT          0 (output 29)
+    # 10      READ A                11111111 (outputs 21-28)
+    # 11      LOAD B  00000001
+    # 12      ACTIVATE ALU
+    # 13      READ FLAGBIT          1 (output 29)
+    # 14      READ A                00000000 (outputs 21-28)
     spikes = {
         # activate ALU
-        0: np.array([4, 7, 10]),
+        0: np.array([4, 8, 12]),
         # Register A
         #   read/send BUS
-        1: np.array([2, 5, 8, 11]),
+        1: np.array([2, 6, 10, 14]),
         #   reset
         2: np.array([]),
         #   set byte
@@ -502,16 +505,18 @@ if False and __name__ == '__main__':
         10: np.array([]),
         # Register B
         #   reset
-        11: np.array([6, 9]),
+        11: np.array([7, 11]),
         #   set byte
-        12: np.array([9 + ht]),
-        13: np.array([3, 6 + ht]),
-        14: np.array([6 + ht]),
+        12: np.array([11]) + ht,
+        13: np.array([3, 7]) + ht,
+        14: np.array([7]) + ht,
         15: np.array([]),
-        16: np.array([6 + ht]),
-        17: np.array([3, 6 + ht]),
+        16: np.array([7]) + ht,
+        17: np.array([3, 7]) + ht,
         18: np.array([]),
-        19: np.array([6 + ht]),
+        19: np.array([7]) + ht,
+        # read flag bit
+        20: np.array([5, 9, 13])
     }
 
     # save_svg(gluing_visual.generate(), dump_folder / 'svgs' / "gluing_ALU.svg", 20,
@@ -520,7 +525,7 @@ if False and __name__ == '__main__':
 
 
 # Testing all components (except for CPU) by hand
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     # test with:
     # > src/doryta --spike-driven \
     # > --load-model=../data/models/snn-circuits/snn-models/all-glued-but-cpu.doryta.bin \
@@ -612,6 +617,8 @@ if True and __name__ == '__main__':
         25: np.array([]),
         # glued_alu-regB-reset
         26: np.array([]),
+        # glued_alu-flag-read
+        27: np.array([19]),
     }
 
     save_spikes_for_doryta(dump_folder / 'spikes' / 'all-glued-but-cpu',
@@ -653,3 +660,15 @@ if False and __name__ == '__main__':
     glued_visual = glued_snvisual.generate(mode='auto')
     save_svg(glued_visual, dump_folder / 'svgs' / "all_glued_but_CPU-auto.svg", 30,
              print_dummy=True)
+
+
+# Testing control unit
+if True and __name__ == '__main__':
+    ht = 1/256
+    control_unit = base.control_unit(ht)
+
+
+# Testing everything
+if True and __name__ == '__main__':
+    ht = 1/256
+    computer_8bit = base.computer_8bit(ht)
