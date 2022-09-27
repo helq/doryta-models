@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pathlib
+from typing import Any
+import sys
 
 import numpy as np
 
@@ -453,7 +455,7 @@ if False and __name__ == '__main__':
 
 
 # Testing ALU, register A and B
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     ht = 1/256
     n_bits = 8
 
@@ -663,12 +665,99 @@ if False and __name__ == '__main__':
 
 
 # Testing control unit
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     ht = 1/256
     control_unit = base.control_unit(ht)
 
 
+def content(mnemonic: str, data: int = 0) -> int:
+    mn_table = {
+        'LDA': 0b0000,  # loads into register A
+        'ADD': 0b0001,  # adds number to register A
+        # 'SUB': 0b0010,
+        'CLR': 0b0011,  # clears address
+        'OUT': 0b1110,  # outputs content of register A
+        'HLT': 0b1111,  # stops execution
+        'STA': 0b1010,  # copy register A to address
+        'JMP': 0b1011,  # change counter to given address
+        'NOP': 0b0111,  # no operation
+        'JO':  0b0100,  # change counter to address if overflow flag active
+        'JZ':  0b0110,  # change counter to address if zero flag active
+    }
+    if mnemonic == 'DATA':
+        if data != data & 0xFF:
+            print(f"Warning: input data is not one byte {mnemonic, data}", file=sys.stderr)
+        return data & 0xFF
+    else:
+        if data != data & 0x0F:
+            print(f"Warning: input data is not one nib {mnemonic, data}", file=sys.stderr)
+        return (mn_table[mnemonic] << 4) + (data & 0x0F)
+
+
+def spike_data_from_instructions(
+    instructions: list[str | tuple[str, int]],
+    sep: float
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    spikes_array = np.zeros((len(instructions), 14))
+    times = np.arange(1, len(instructions) + 1) * sep
+
+    addresses = np.arange(len(instructions)).reshape(-1, 1)
+    bin_addresses = (((2**np.arange(4)) & addresses) != 0).astype(int)
+
+    data = np.array([
+        content(*inst) if isinstance(inst, tuple) else content(inst)
+        for inst in instructions])
+    bin_data = (((2**np.arange(8)) & data.reshape(-1, 1)) != 0).astype(int)
+
+    spikes_array[:, 2:6] = bin_addresses[:, -1::-1]
+    spikes_array[:, 6:] = bin_data[:, -1::-1]
+
+    return spikes_array.astype(int), times
+
+
 # Testing everything
 if True and __name__ == '__main__':
+    # test with:
+    # > src/doryta --spike-driven \
+    # > --load-model=../data/models/snn-circuits/snn-models/computer_8bit_v1.doryta.bin \
+    # > --load-spikes=../data/models/snn-circuits/spikes/computer_8bit_v1.bin --probe-firing \
+    # > --output-dir=testing-8-bit/computer_8bit_v1 --save-state --end=20
+
     ht = 1/256
     computer_8bit = base.computer_8bit(ht)
+
+    save(computer_8bit.circuit.remove_unneded_neurons(),
+         dump_folder / 'snn-models' / 'computer_8bit_v1.doryta.bin',
+         heartbeat=ht, verbose=True)
+
+    # creating spikes
+    spikes_array, times = spike_data_from_instructions([
+        ('LDA', 0x8),            # 0x0
+        ('ADD', 0x9),            # 0x1
+        ('STA', 0x7),            # 0x2
+        ('LDA', 0xA),            # 0x3
+        ('ADD', 0x7),            # 0x4
+        ('OUT'),                 # 0x5
+        ('HLT'),                 # 0x6
+        ('DATA', 0b00100010),    # 0x7
+        ('DATA', 0b01000001),    # 0x8
+        ('DATA', 0b10101000),    # 0x9
+        ('DATA', 0b01000001),    # 0xA
+    ], ht * 6)
+    # print(spikes_array)
+    # print(times)
+
+    spikes = {
+        # bus to ram
+        14: times + 2 * ht,
+        # bus to counter
+        15: np.array([]),
+        # bus to cpu
+        16: np.array([]),
+        # start
+        17: np.array([10]),
+    }
+
+    save_spikes_for_doryta(dump_folder / 'spikes' / 'computer_8bit_v1',
+                           img=spikes_array[:, -1::-1], times=times,
+                           individual_spikes=spikes)

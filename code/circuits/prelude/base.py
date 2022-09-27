@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from math import log
+from collections import defaultdict
 from typing import Literal
+from typing import NamedTuple
 
-from ..sncircuit import SNCreate, LIF
+from ..sncircuit import SNCreate, LIF, SNCircuit
 from ..snvisualize import SNCreateVisual
 from ..visualize.base import CircuitDisplay
 
@@ -724,37 +726,350 @@ def all_glued_but_CPU(  # noqa: C901
     return snc
 
 
-def control_unit(heartbeat: float) -> tuple[SNCreate, dict[str, int]]:
+class DFA(NamedTuple):
+    """
+    The DFA properties force it to
+    """
+    circuit: SNCircuit
+    outputs: dict[str, int]
+
+    def check_validity(
+        self,
+        possible_inputs: set[str] | None = None,
+        possible_outputs: set[str] | None = None
+    ) -> str | None:
+        if possible_inputs is None:
+            possible_inputs = {'activate', 'flagbit-result'}
+        else:
+            possible_inputs = possible_inputs | {'activate'}
+        if possible_outputs is None:
+            possible_outputs = {
+                'bus-to-ram', 'bus-to-regA', 'bus-to-regB', 'bus-to-counter',
+                'bus-to-cpu', 'bus-to-output', 'counter-to-bus', 'clean-counter',
+                'increment-counter', 'activate-alu', 'regA-to-bus', 'clean-regA',
+                'clean-regB', 'get-flagbit',
+                'additional_to_store_0', 'additional_to_store_1', 'store_to_bus',
+                'continuation'}
+        else:
+            possible_outputs = possible_outputs | {'continuation'}
+
+        if 'activate' not in self.circuit.inputs_id:
+            return '`activate` input not defined'
+        unrecognized_inputs = set(self.circuit.inputs_id) - possible_inputs
+        if unrecognized_inputs:
+            return f"there are extreneous inputs defined by the DFA `{unrecognized_inputs}`"
+        if len(self.circuit.outputs) != len(self.outputs):
+            return "the number of outputs must coincide with the names given to them"
+        if list(sorted(self.outputs.values())) != list(range(len(self.outputs))):
+            return f"the output values {list(self.outputs.values())} are not the numbers " \
+                f"0 to {len(self.outputs)-1}"
+        unrecognized_inputs = set(self.outputs) - possible_outputs
+        if unrecognized_inputs:
+            return f"there are extreneous outputs defined by the DFA `{unrecognized_inputs}`"
+
+        return None
+
+    @classmethod
+    def halt(cls) -> DFA:
+        with SNCreate(neuron_type=LIF, neuron_params={}, synapse_params={}) as dfa_halt:
+            dfa_halt.input("activate", inputs=[])
+        return DFA(dfa_halt.circuit, {})
+
+    @classmethod
+    def lda(cls, heartbeat: float) -> DFA:
+        with SNCreate(
+            neuron_type=LIF,
+            neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+            synapse_params={"weight": 1.0, "delay": 1}
+        ) as snc:
+            snc.input("activate", synapses={
+                'store_to_bus', 'additional_to_store_0', 'clean-regA'
+            })
+            outputs = ['store_to_bus', 'additional_to_store_0', 'clean-regA',
+                       'bus-to-ram', 'bus-to-regA', 'continuation']
+            for out in outputs:
+                snc.output(out)
+
+            snc.neuron('store_to_bus', synapses={'bus-to-ram': {'delay': 3}})
+            snc.neuron('bus-to-ram', synapses={'bus-to-regA': {'delay': 10}})
+            snc.neuron('bus-to-regA', synapses={'continuation': {'delay': 3}})
+
+            for out in outputs:
+                if out not in snc._neurons:
+                    snc.neuron(out)
+        return DFA(snc.circuit, {out: i for i, out in enumerate(outputs)})
+
+    @classmethod
+    def add(cls, heartbeat: float) -> DFA:
+        with SNCreate(
+            neuron_type=LIF,
+            neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+            synapse_params={"weight": 1.0, "delay": 1}
+        ) as snc:
+            snc.input("activate", synapses={
+                'store_to_bus', 'additional_to_store_0', 'clean-regB'
+            })
+            outputs = ['store_to_bus', 'additional_to_store_0', 'clean-regB',
+                       'bus-to-ram', 'bus-to-regB', 'activate-alu', 'continuation']
+            for out in outputs:
+                snc.output(out)
+
+            snc.neuron('store_to_bus', synapses={'bus-to-ram': {'delay': 3}})
+            snc.neuron('bus-to-ram', synapses={'bus-to-regB': {'delay': 20}})
+            snc.neuron('bus-to-regB', synapses={'activate-alu': {'delay': 3}})
+            snc.neuron('activate-alu', synapses={'continuation': {'delay': 30}})
+
+            for out in outputs:
+                if out not in snc._neurons:
+                    snc.neuron(out)
+        return DFA(snc.circuit, {out: i for i, out in enumerate(outputs)})
+
+    @classmethod
+    def out(cls, heartbeat: float) -> DFA:
+        with SNCreate(
+            neuron_type=LIF,
+            neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+            synapse_params={"weight": 1.0, "delay": 1}
+        ) as snc:
+            snc.input("activate", synapses={'regA-to-bus'})
+            outputs = ['regA-to-bus', 'bus-to-output', 'continuation']
+            for out in outputs:
+                snc.output(out)
+
+            snc.neuron('regA-to-bus', synapses={'bus-to-output': {'delay': 3}})
+            snc.neuron('bus-to-output', synapses={'continuation'})
+            snc.neuron('continuation')
+        return DFA(snc.circuit, {out: i for i, out in enumerate(outputs)})
+
+    @classmethod
+    def nop(cls, heartbeat: float) -> DFA:
+        with SNCreate(
+            neuron_type=LIF,
+            neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+            synapse_params={"weight": 1.0, "delay": 1}
+        ) as snc:
+            snc.input("activate", synapses={'continuation'})
+            snc.output('continuation')
+            snc.neuron('continuation')
+        return DFA(snc.circuit, {'continuation': 0})
+
+    @classmethod
+    def clr(cls, heartbeat: float) -> DFA:
+        with SNCreate(
+            neuron_type=LIF,
+            neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+            synapse_params={"weight": 1.0, "delay": 1}
+        ) as snc:
+            synapses: dict[str, dict[str, float]] = {
+                'additional_to_store_1': {},
+                'store_to_bus': {},
+                'bus-to-ram': {'delay': 4},
+                'continuation': {'delay': 7}
+            }
+            snc.input("activate", synapses=synapses)
+
+            for out in synapses:
+                snc.output(out)
+
+            for neu in synapses:
+                snc.neuron(neu)
+        return DFA(snc.circuit, {out: i for i, out in enumerate(synapses)})
+
+    @classmethod
+    def sta(cls, heartbeat: float) -> DFA:
+        with SNCreate(
+            neuron_type=LIF,
+            neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+            synapse_params={"weight": 1.0, "delay": 1}
+        ) as snc:
+            sequence: dict[str, int | tuple[int, str]] = {
+                # clean ram
+                'additional_to_store_1': 1,
+                'store_to_bus': 1,
+                'bus-to-ram': 4,
+                # # restore reset bit
+                'additional_to_store_1-b': (4, 'additional_to_store_1'),
+                # # move data from regA to RAM
+                'store_to_bus-b': (7, 'store_to_bus'),
+                'regA-to-bus': 7,
+                'bus-to-ram-b': (11, 'bus-to-ram'),
+                # exiting
+                'continuation': 13
+            }
+            snc.input("activate", synapses={
+                name: {'delay': syn[0] if isinstance(syn, tuple) else syn}
+                for name, syn in sequence.items()})
+
+            # defining outputs
+            outputs: dict[str, list[str]] = defaultdict(list)
+            for name, syn in sequence.items():
+                if isinstance(syn, tuple):
+                    outputs[syn[1]].append(name)
+                else:
+                    outputs[name].append(name)
+
+            for outs in outputs.values():
+                snc.output(outs)
+
+            # defining neurons
+            for neu in sequence:
+                snc.neuron(neu)
+        return DFA(snc.circuit, {out: i for i, out in enumerate(outputs)})
+
+
+def control_unit(  # noqa: C901
+    heartbeat: float,
+    dfas: dict[str, DFA] | None = None,
+    outputs: list[str] | None = None
+) -> tuple[SNCreate, dict[str, int]]:
     n_bits = 8
     ram_addr_bits = 4
+
+    if dfas is None:
+        dfas = {
+            '0000': DFA.lda(heartbeat),
+            '0001': DFA.add(heartbeat),
+            '0011': DFA.clr(heartbeat),
+            '0111': DFA.nop(heartbeat),
+            '1010': DFA.sta(heartbeat),
+            '1110': DFA.out(heartbeat),
+            '1111': DFA.halt()
+        }
+    # checking DFAS
+    for addr, dfa in dfas.items():
+        error = dfa.check_validity()
+        if error is not None:
+            raise ValueError(f"The DFA associated to address {addr} is not valid.\n"
+                             "Error: " + error)
+
+    if outputs is None:
+        outputs = ['bus-to-ram', 'bus-to-regA', 'bus-to-regB', 'bus-to-counter',
+                   'bus-to-cpu', 'bus-to-output', 'counter-to-bus', 'clean-counter',
+                   'increment-counter', 'activate-alu', 'regA-to-bus', 'clean-regA',
+                   'clean-regB', 'get-flagbit', 'store_to_bus_0', 'store_to_bus_1',
+                   'store_to_bus_2', 'store_to_bus_3', 'additional_to_bus_0',
+                   'additional_to_bus_1']
+    dfa_connections = {
+        'continuation': 'cleanup',
+        'additional_to_store_0': 'Storage.set_4',
+        'additional_to_store_1': 'Storage.set_5',
+        'store_to_bus': 'Storage.bus'}
+
+    # Filling information about the outputs of the network from DFAs
+    paired_outputs: dict[str, list[str]] = {out: [] for out in outputs}
+    for addr, dfa in dfas.items():
+        for out_name, out_i in dfa.outputs.items():
+            if out_name in dfa_connections:
+                continue
+            paired_outputs[out_name].append(f"DFA_{addr}.out_{out_i}")
+
+    # Helper function to find DFA given a bit sequence (like 0000, or 1110)
+    def _finding_address_helper(current_bit: int, suffix: str) -> None:
+        assert 0 < current_bit < ram_addr_bits
+
+        if current_bit + 1 == ram_addr_bits:  # base case
+            to_inputs_1 = [f'DFA_1{suffix}.activate'] if "1"+suffix in dfas else []  # type: ignore
+            to_inputs_0 = [f'DFA_0{suffix}.activate'] if "0"+suffix in dfas else []  # type: ignore
+            snc.neuron(f"inst-{current_bit}-{suffix}", to_inputs=to_inputs_1)
+            snc.neuron(f"ninst-{current_bit}-{suffix}", to_inputs=to_inputs_0)
+
+        else:  # recursive case
+            # These neurons decide where to route the data for the next layer, so
+            # they're data
+            data_curr = [f'inst-{i}' for i in range(current_bit + 1, ram_addr_bits)] \
+                + [f'ninst-{i}' for i in range(current_bit + 1, ram_addr_bits)]
+            snc.neuron(f"inst-{current_bit}-{suffix}",
+                       synapses={f"{s}-1{suffix}" for s in data_curr})
+            snc.neuron(f"ninst-{current_bit}-{suffix}",
+                       synapses={f"{s}-0{suffix}" for s in data_curr})
+
+            # These neurons are treated as data neurons at this level
+            for i in range(current_bit + 1, ram_addr_bits):
+                snc.neuron(f"inst-{i}-{suffix}",
+                           synapses={f"inst-{i}-0{suffix}", f"inst-{i}-1{suffix}"})
+                snc.neuron(f"ninst-{i}-{suffix}",
+                           synapses={f"ninst-{i}-0{suffix}", f"ninst-{i}-1{suffix}"})
+
+            _finding_address_helper(current_bit + 1, "0" + suffix)
+            _finding_address_helper(current_bit + 1, "1" + suffix)
+
+    # defining address memory
+    storage, storage_outputs = bus(
+        heartbeat, n_bits=6, output_pieces={'bus': 'q'}, clear_after_sending=False)
+
+    for i, out_i in enumerate(storage_outputs['bus'][:4]):
+        paired_outputs[f'store_to_bus_{i}'].append(f'Storage.out_{out_i}')
+    for i, out_i in enumerate(storage_outputs['bus'][4:]):
+        paired_outputs[f'additional_to_bus_{i}'].append(f'Storage.out_{out_i}')
 
     # connecting all pieces
     with SNCreate(
         neuron_type=LIF,
         neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
-        synapse_params={"weight": 1.5, "delay": 1}
+        synapse_params={"weight": 0.5, "delay": 1}
     ) as snc:
+        weight1 = {'weight': 1.0}
         # Define inputs
-        snc.input('start', inputs=[])
-        for i in range(n_bits):
-            snc.input(f'from_bus_{i}', inputs=[])
+        snc.input('start', synapses={'counter-to-bus': weight1})
+
+        # - ninst and possible addr
+        for i in range(4):
+            snc.input(f'from_bus_{i}', inputs=[f'Storage.set_{i}'])
+        data_curr = [f'inst-{i}' for i in range(1, ram_addr_bits)] \
+            + [f'ninst-{i}' for i in range(1, ram_addr_bits)]
+        snc.input("from_bus_4", synapses={f"{s}-1" for s in data_curr})
+        for i in range(5, n_bits):
+            snc.input(f"from_bus_{i}", synapses={f"inst-{i-4}-0", f"inst-{i-4}-1"})
+        #   - neq insts
+        snc.input('from_nbus_0', synapses={f"{s}-0" for s in data_curr})
+        for i in range(1, 4):
+            snc.input(f"from_nbus_{i}", synapses={f"ninst-{i}-0", f"ninst-{i}-1"})
+
         snc.input('flagbit-result', inputs=[])
 
-        # Define outputs
-        outputs = ['bus-to-ram', 'bus-to-regA', 'bus-to-regB', 'bus-to-counter',
-                   'bus-to-cpu', 'bus-to-output', 'counter-to-bus', 'clean-counter',
-                   'increment-counter', 'activate-alu', 'regA-to-bus', 'clean-regA',
-                   'clean-regB', 'get-flagbit']
-        outputs.extend(f'store_to_bus_{i}' for i in range(ram_addr_bits))
-        outputs.extend(['additional_to_bus_0', 'additional_to_bus_1'])
-        for _ in outputs:
-            snc.output([])
+        # Building addressing structure
+        _finding_address_helper(current_bit=1, suffix="0")
+        _finding_address_helper(current_bit=1, suffix="1")
 
-    return (snc, {v: k for k, v in enumerate(outputs)})
+        # Defining addressing cycle
+        # - cycle start (before running instruction)
+        #   * move counter to bus
+        snc.neuron('counter-to-bus', synapses={'additional_to_bus_0': weight1})
+        snc.neuron('additional_to_bus_0', synapses={'bus-to-ram': weight1})
+        snc.neuron('bus-to-ram', synapses={'bus-to-cpu': weight1 | {'delay': 10}})
+        snc.neuron('bus-to-cpu')
+        # - cycle end (after running instruction)
+        snc.neuron('cleanup', to_inputs=['Storage.reset'],
+                   synapses={'increment-counter': weight1})
+        snc.neuron('increment-counter', synapses={'counter-to-bus': weight1 | {'delay': 18}})
+
+        neurons = ['counter-to-bus', 'additional_to_bus_0', 'bus-to-ram', 'bus-to-cpu',
+                   'increment-counter']
+        for neu in neurons:
+            paired_outputs[neu].append(neu)
+
+        # Connecting all DFA "continuations" and other connections to the rest
+        for suffix, dfa in dfas.items():
+            for conn, to in dfa_connections.items():
+                if conn in dfa.outputs:
+                    out_i = dfa.outputs[conn]
+                    params = weight1 if to in snc._neurons else None
+                    snc.connection(f"DFA_{suffix}.out_{out_i}", to, synapse_params=params)
+
+        # Define outputs
+        for outs in paired_outputs.values():
+            snc.output(outs)
+
+        # ### Including all the necessary dfa for `ram_addr_bits` levels
+        for suffix, dfa in dfas.items():
+            snc.include(f"DFA_{suffix}", dfa.circuit)
+        snc.include("Storage", storage.circuit)
+
+    return (snc, {v: i for i, v in enumerate(outputs)})
 
 
 def computer_8bit(  # noqa: C901
-    heartbeat: float
+    heartbeat: float,
 ) -> SNCreate:
     n_bits = 8
     ram_addr_bits = 4
@@ -773,8 +1088,8 @@ def computer_8bit(  # noqa: C901
             'reg-a': 'q',
             'reg-b': 'q',
             'reg-counter': 'q',
-            'cpu': 'q',
-            'output-circuit': 'q',
+            'cpu': 'both',
+            'output-circuit': 'both',
         })
     # Load RAM and counter up register
     ram = RAM(heartbeat, depth=ram_addr_bits)
@@ -794,21 +1109,23 @@ def computer_8bit(  # noqa: C901
         #   - BUS set, activation and redirection bits
         #   - counter count-up, read and reset
         #   - read, reset and activate (alu) for glued-ALU
-        snc.input('start', inputs=['ControlUnit.start'])
-        bus_inputs = ['ram', 'reg-counter']
-        bus_inputs.extend(f'set_{i}' for i in range(14))
+        bus_inputs = [f'set_{i}' for i in range(14)]
+        bus_inputs.extend(['ram', 'reg-counter', 'cpu'])
         for input_name in bus_inputs:
             snc.input(f'bus-{input_name}', inputs=[f'BUS.{input_name}'])
+        snc.input('start', inputs=['ControlUnit.start'])
         # Outputs:
         #   - BUS to output connection
-        for out_i in bus_outputs['output-circuit'][:n_bits]:
+        for out_i in bus_outputs['output-circuit']:
+            snc.output(f'BUS.out_{out_i}')
+        for out_i in bus_outputs['output-circuit-no-q']:
             snc.output(f'BUS.out_{out_i}')
 
         # Connect BUS to all four of its components and assign output as output of the whole circuit
         #   - Connecting BUS to Counter and back
         for i, out_i in enumerate(bus_outputs['reg-counter'][:ram_addr_bits]):
             snc.connection(f'BUS.out_{out_i}', f'Counter.set_{i}')
-            snc.connection(f'Counter.out_{i}', f'BUS.set_{i}')
+            snc.connection(f'Counter.out_{i}', f'BUS.set_{i + 8}')
         #   - Connecting BUS to RAM and back
         for i, out_i in enumerate(bus_outputs['ram'][:n_bits]):
             snc.connection(f'BUS.out_{out_i}', f'RAM.set_{i}')
@@ -830,7 +1147,7 @@ def computer_8bit(  # noqa: C901
         #   - Control Unit to all other parts
         for circuit_name, input_list in [
                 ('BUS',
-                 [('ram', 'bus-to-ram'), ('reg-a', 'bus-to-regB'), ('reg-a', 'bus-to-regB'),
+                 [('ram', 'bus-to-ram'), ('reg-a', 'bus-to-regA'), ('reg-b', 'bus-to-regB'),
                   ('reg-counter', 'bus-to-counter'), ('cpu', 'bus-to-cpu'),
                   ('output-circuit', 'bus-to-output')] +
                  [(f'set_{i+8}', f'store_to_bus_{i}') for i in range(4)] +
@@ -844,9 +1161,11 @@ def computer_8bit(  # noqa: C901
             for input, cpu_output in input_list:
                 out_i = control_unit_output[cpu_output]
                 snc.connection(f'ControlUnit.out_{out_i}', f'{circuit_name}.{input}')
-        #   - Control Unit to all other parts
+        #   - Everything to Control Unit
         for i, out_i in enumerate(bus_outputs['cpu'][:n_bits]):
             snc.connection(f'BUS.out_{out_i}', f'ControlUnit.from_bus_{i}')
+        for i, out_i in enumerate(bus_outputs['cpu-no-q'][4:n_bits]):
+            snc.connection(f'BUS.out_{out_i}', f'ControlUnit.from_nbus_{i}')
         snc.connection(f'Glued_ALU.out_{n_bits}', 'ControlUnit.flagbit-result')
 
         # Including parts

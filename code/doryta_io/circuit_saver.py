@@ -26,9 +26,9 @@ def save(
     neurons_to_save.extend(Neuron(params=memoryless_neuron, synapses={})
                            for _ in circuit.outputs)
     neurons_to_save.extend(
-        Neuron(circuit.neurons[i].params,
-               {i+additional_ids: synaps for i, synaps in circuit.neurons[i].synapses.items()})
-        for i in range(circuit.num_neurons))
+        Neuron(neuron.params,
+               {i+additional_ids: synaps for i, synaps in neuron.synapses.items()})
+        for neuron in circuit.neurons)
     # Adding connections to outputs
     for i, outputs_i in enumerate(circuit.outputs):
         for out_neu in outputs_i:
