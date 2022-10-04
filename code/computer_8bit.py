@@ -682,7 +682,8 @@ def content(mnemonic: str, data: int = 0) -> int:
         'JMP': 0b1011,  # change counter to given address
         'NOP': 0b0111,  # no operation
         'JO':  0b0100,  # change counter to address if overflow flag active
-        'JZ':  0b0110,  # change counter to address if zero flag active
+        'JNO': 0b1100,  # change counter to address if overflow flag inactive
+        # 'JZ':  0b0110,  # change counter to address if zero flag active
     }
     if mnemonic == 'DATA':
         if data != data & 0xFF:
@@ -720,8 +721,12 @@ if True and __name__ == '__main__':
     # test with:
     # > src/doryta --spike-driven \
     # > --load-model=../data/models/snn-circuits/snn-models/computer_8bit_v1.doryta.bin \
-    # > --load-spikes=../data/models/snn-circuits/spikes/computer_8bit_v1.bin --probe-firing \
-    # > --output-dir=testing-8-bit/computer_8bit_v1 --save-state --end=20
+    # > --load-spikes=../data/models/snn-circuits/spikes/computer_8bit_v1-hello-world.bin \
+    # > --probe-firing{,-output-only} --output-dir=testing-8-bit/computer_8bit_v1 \
+    # > --save-state --end=20
+    # check output with:
+    # > python tools/sncircuits/process_output.py \
+    # > --path build/testing-8-bit/computer_8bit_v1 --complement
 
     ht = 1/256
     computer_8bit = base.computer_8bit(ht)
@@ -730,34 +735,62 @@ if True and __name__ == '__main__':
          dump_folder / 'snn-models' / 'computer_8bit_v1.doryta.bin',
          heartbeat=ht, verbose=True)
 
-    # creating spikes
-    spikes_array, times = spike_data_from_instructions([
-        ('LDA', 0x8),            # 0x0
-        ('ADD', 0x9),            # 0x1
-        ('STA', 0x7),            # 0x2
-        ('LDA', 0xA),            # 0x3
-        ('ADD', 0x7),            # 0x4
-        ('OUT'),                 # 0x5
-        ('HLT'),                 # 0x6
-        ('DATA', 0b00100010),    # 0x7
-        ('DATA', 0b01000001),    # 0x8
-        ('DATA', 0b10101000),    # 0x9
-        ('DATA', 0b01000001),    # 0xA
-    ], ht * 6)
-    # print(spikes_array)
-    # print(times)
-
-    spikes = {
-        # bus to ram
-        14: times + 2 * ht,
-        # bus to counter
-        15: np.array([]),
-        # bus to cpu
-        16: np.array([]),
-        # start
-        17: np.array([10]),
+    programs: dict[str, list[str | tuple[str, int]]] = {
+        'add-to-42': [
+            ('LDA', 0x8),            # 0x0
+            ('ADD', 0x9),            # 0x1
+            ('STA', 0x7),            # 0x2
+            ('LDA', 0xA),            # 0x3
+            ('ADD', 0x7),            # 0x4
+            ('OUT'),                 # 0x5
+            ('HLT'),                 # 0x6
+            ('DATA', 0b00100010),    # 0x7
+            ('DATA', 0b01000001),    # 0x8
+            ('DATA', 0b10101000),    # 0x9
+            ('DATA', 0b01000001),    # 0xA
+        ],
+        'hello-world': [  # will print "Hi world!" followed by many extraneous bytes
+            ('LDA', 0x3),          # 0x0
+            ('ADD', 0x6),          # 0x1
+            ('STA', 0x3),          # 0x2
+            ('LDA', 0x6),          # 0x3
+            ('OUT'),               # 0x4
+            ('JMP', 0x0),          # 0x5
+            ('DATA', 0x1),         # 0x6
+            ('DATA', ord('H')),    # 0x7
+            ('DATA', ord('i')),    # 0x8
+            ('DATA', ord(' ')),    # 0x9
+            ('DATA', ord('W')),    # 0xA
+            ('DATA', ord('o')),    # 0xB
+            ('DATA', ord('r')),    # 0xC
+            ('DATA', ord('l')),    # 0xD
+            ('DATA', ord('d')),    # 0xE
+            ('DATA', ord('!')),    # 0xF
+        ],
     }
 
-    save_spikes_for_doryta(dump_folder / 'spikes' / 'computer_8bit_v1',
-                           img=spikes_array[:, -1::-1], times=times,
-                           individual_spikes=spikes)
+    for name, program in programs.items():
+        # creating spikes
+        spikes_array, times = spike_data_from_instructions(program, ht * 6)
+        # print(spikes_array)
+        # print(times)
+
+        spikes_array[16:] = 0
+        spikes_array[16:, 5] = 1
+
+        spikes = {
+            # bus to ram
+            14: times[:16] + 2 * ht,
+            # bus to counter
+            # 15: np.array([]),
+            15: times[16:] + 2 * ht,
+            # bus to cpu
+            16: np.array([]),
+            # start
+            # 17: np.array([10]),
+            17: times[-1:] + 10 * ht
+        }
+
+        save_spikes_for_doryta(dump_folder / 'spikes' / f'computer_8bit_v1-{name}',
+                               img=spikes_array[:, -1::-1], times=times,
+                               individual_spikes=spikes)

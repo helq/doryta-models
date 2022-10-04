@@ -267,10 +267,16 @@ class SNCircuit(NamedTuple):
         return SNCircuit(outputs=self.outputs, inputs=new_inputs, inputs_id=inputs_id,
                          neurons=self.neurons, ids_to_int=self.ids_to_int)
 
-    def remove_unneded_neurons(self, verbose: bool = False) -> SNCircuit:
+    def remove_unneded_neurons(
+        self, verbose: bool = False, preserve_inputs: bool = False
+    ) -> SNCircuit:
         """
-        This function creates a new circuit where all neurons that never connect back to
-        other neurons that will eventually output.
+        This function creates a new circuit with neurons that output and any other neuron
+        that eventually connects to them.
+        A circuit with no outputs will be cleansed of all neurons (unless
+        `preserve_inputs` is selected in which case only the input neurons are preserved).
+        This function is useful for when circuits have plenty of dangling/dead neurons
+        that never connect to any others (and are not outputs themselves).
         """
         # Find all neurons that eventually connect to the outputs
         #  - Reverse graph
@@ -288,7 +294,10 @@ class SNCircuit(NamedTuple):
             visited.add(n)
             to_visit |= set(rev_neurons[n])
         #  - Include nodes from input
-        reduced = visited | {n for inp in self.inputs for n in inp}
+        if preserve_inputs:
+            reduced = visited | {n for inp in self.inputs for n in inp}
+        else:
+            reduced = visited
         #  - New ids for the circuit should start in 0 and end in n
         new_ids: dict[int, int] = {id: new_id for new_id, id in enumerate(sorted(reduced))}
         if verbose:

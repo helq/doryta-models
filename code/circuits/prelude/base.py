@@ -749,7 +749,7 @@ class DFA(NamedTuple):
                 'increment-counter', 'activate-alu', 'regA-to-bus', 'clean-regA',
                 'clean-regB', 'get-flagbit',
                 'additional_to_store_0', 'additional_to_store_1', 'store_to_bus',
-                'continuation'}
+                'continuation', 'cleanup'}
         else:
             possible_outputs = possible_outputs | {'continuation'}
 
@@ -883,7 +883,7 @@ class DFA(NamedTuple):
             synapse_params={"weight": 1.0, "delay": 1}
         ) as snc:
             sequence: dict[str, int | tuple[int, str]] = {
-                # clean ram
+                # clean ram address
                 'additional_to_store_1': 1,
                 'store_to_bus': 1,
                 'bus-to-ram': 4,
@@ -916,6 +916,31 @@ class DFA(NamedTuple):
                 snc.neuron(neu)
         return DFA(snc.circuit, {out: i for i, out in enumerate(outputs)})
 
+    @classmethod
+    def jmp(cls, heartbeat: float) -> DFA:
+        with SNCreate(
+            neuron_type=LIF,
+            neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+            synapse_params={"weight": 1.0, "delay": 1}
+        ) as snc:
+            sequence: dict[str, int] = {
+                # clean counter
+                'clean-counter': 1,
+                # set counter
+                'store_to_bus': 1,
+                'bus-to-counter': 4,
+                # # restore reset bit
+                'cleanup': 5
+            }
+            snc.input("activate", synapses={
+                name: {'delay': syn} for name, syn in sequence.items()})
+
+            # defining outputs and neurons
+            for neu in sequence:
+                snc.output(neu)
+                snc.neuron(neu)
+        return DFA(snc.circuit, {out: i for i, out in enumerate(sequence)})
+
 
 def control_unit(  # noqa: C901
     heartbeat: float,
@@ -932,8 +957,18 @@ def control_unit(  # noqa: C901
             '0011': DFA.clr(heartbeat),
             '0111': DFA.nop(heartbeat),
             '1010': DFA.sta(heartbeat),
+            '1011': DFA.jmp(heartbeat),
             '1110': DFA.out(heartbeat),
-            '1111': DFA.halt()
+            '1111': DFA.halt(),
+            # ---
+            # '0010': DFA.nop(heartbeat),
+            # '0100': DFA.nop(heartbeat),
+            # '0101': DFA.nop(heartbeat),
+            # '0110': DFA.nop(heartbeat),
+            # '1000': DFA.nop(heartbeat),
+            # '1001': DFA.nop(heartbeat),
+            # '1100': DFA.nop(heartbeat),
+            # '1101': DFA.nop(heartbeat),
         }
     # checking DFAS
     for addr, dfa in dfas.items():
@@ -950,7 +985,8 @@ def control_unit(  # noqa: C901
                    'store_to_bus_2', 'store_to_bus_3', 'additional_to_bus_0',
                    'additional_to_bus_1']
     dfa_connections = {
-        'continuation': 'cleanup',
+        'continuation': 'increment-counter',
+        'cleanup': 'cleanup',
         'additional_to_store_0': 'Storage.set_4',
         'additional_to_store_1': 'Storage.set_5',
         'store_to_bus': 'Storage.bus'}
@@ -1039,9 +1075,9 @@ def control_unit(  # noqa: C901
         snc.neuron('bus-to-ram', synapses={'bus-to-cpu': weight1 | {'delay': 10}})
         snc.neuron('bus-to-cpu')
         # - cycle end (after running instruction)
+        snc.neuron('increment-counter', synapses={'cleanup': weight1})
         snc.neuron('cleanup', to_inputs=['Storage.reset'],
-                   synapses={'increment-counter': weight1})
-        snc.neuron('increment-counter', synapses={'counter-to-bus': weight1 | {'delay': 18}})
+                   synapses={'counter-to-bus': weight1 | {'delay': 18}})
 
         neurons = ['counter-to-bus', 'additional_to_bus_0', 'bus-to-ram', 'bus-to-cpu',
                    'increment-counter']
@@ -1123,7 +1159,7 @@ def computer_8bit(  # noqa: C901
 
         # Connect BUS to all four of its components and assign output as output of the whole circuit
         #   - Connecting BUS to Counter and back
-        for i, out_i in enumerate(bus_outputs['reg-counter'][:ram_addr_bits]):
+        for i, out_i in enumerate(bus_outputs['reg-counter'][n_bits:n_bits+ram_addr_bits]):
             snc.connection(f'BUS.out_{out_i}', f'Counter.set_{i}')
             snc.connection(f'Counter.out_{i}', f'BUS.set_{i + 8}')
         #   - Connecting BUS to RAM and back
