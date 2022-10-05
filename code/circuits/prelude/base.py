@@ -1146,7 +1146,7 @@ def computer_8bit(  # noqa: C901
         #   - counter count-up, read and reset
         #   - read, reset and activate (alu) for glued-ALU
         bus_inputs = [f'set_{i}' for i in range(14)]
-        bus_inputs.extend(['ram', 'reg-counter', 'cpu'])
+        bus_inputs.extend(['ram', 'reg-counter'])
         for input_name in bus_inputs:
             snc.input(f'bus-{input_name}', inputs=[f'BUS.{input_name}'])
         snc.input('start', inputs=['ControlUnit.start'])

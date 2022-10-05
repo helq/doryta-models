@@ -710,8 +710,8 @@ def spike_data_from_instructions(
         for inst in instructions])
     bin_data = (((2**np.arange(8)) & data.reshape(-1, 1)) != 0).astype(int)
 
-    spikes_array[:, 2:6] = bin_addresses[:, -1::-1]
-    spikes_array[:, 6:] = bin_data[:, -1::-1]
+    spikes_array[:, 2:6] = bin_addresses[:, ::-1]
+    spikes_array[:, 6:] = bin_data[:, ::-1]
 
     return spikes_array.astype(int), times
 
@@ -728,7 +728,7 @@ if True and __name__ == '__main__':
     # > python tools/sncircuits/process_output.py \
     # > --path build/testing-8-bit/computer_8bit_v1 --complement
 
-    ht = 1/256
+    ht = 1/1024
     computer_8bit = base.computer_8bit(ht)
 
     save(computer_8bit.circuit.remove_unneded_neurons(),
@@ -749,48 +749,61 @@ if True and __name__ == '__main__':
             ('DATA', 0b10101000),    # 0x9
             ('DATA', 0b01000001),    # 0xA
         ],
-        'hello-world': [  # will print "Hi world!" followed by many extraneous bytes
-            ('LDA', 0x3),          # 0x0
-            ('ADD', 0x6),          # 0x1
-            ('STA', 0x3),          # 0x2
-            ('LDA', 0x6),          # 0x3
-            ('OUT'),               # 0x4
-            ('JMP', 0x0),          # 0x5
-            ('DATA', 0x1),         # 0x6
-            ('DATA', ord('H')),    # 0x7
-            ('DATA', ord('i')),    # 0x8
-            ('DATA', ord(' ')),    # 0x9
-            ('DATA', ord('W')),    # 0xA
-            ('DATA', ord('o')),    # 0xB
-            ('DATA', ord('r')),    # 0xC
-            ('DATA', ord('l')),    # 0xD
-            ('DATA', ord('d')),    # 0xE
-            ('DATA', ord('!')),    # 0xF
+        'hello-world': [  # outputs "Hi world!" and terminates
+            ('DATA', ord('!')),    # 0x0
+            ('DATA', ord('d')),    # 0x1
+            ('DATA', ord('l')),    # 0x2
+            ('DATA', ord('r')),    # 0x3
+            ('DATA', ord('o')),    # 0x4
+            ('DATA', ord('W')),    # 0x5
+            ('DATA', ord(' ')),    # 0x6
+            ('DATA', ord('i')),    # 0x7
+            ('DATA', ord('H')),    # 0x8
+            ('LDA', 0x8),          # 0x9
+            ('OUT'),               # 0xA
+            ('LDA', 0x9),          # 0xB
+            ('ADD', 0xF),          # 0xC
+            ('STA', 0x9),          # 0xD
+            ('JMP', 0x9),          # 0xE
+            ('DATA', 0xFF),        # 0xF
         ],
+    }
+    addresses_start: dict[str, int] = {
+        'hello-world': 0x9
     }
 
     for name, program in programs.items():
+        # extending spikes with address to start the computation if provided
+        if name in addresses_start:
+            program = program + [('DATA', 0x0)]
+
         # creating spikes
         spikes_array, times = spike_data_from_instructions(program, ht * 6)
+
+        if name in addresses_start:
+            address = addresses_start[name]
+            assert addresses_start[name] & 0xF == address, \
+                f"The address {address} is larger than 4 bits"
+
+            spikes_array[-1, 2:6] = np.array(list(f"{address:4b}"), dtype='u1')
+            bus_to_ram = times[:-1] + 2 * ht
+            bus_to_counter = times[-1:] + 2 * ht
+        else:
+            bus_to_ram = times + 2 * ht
+            bus_to_counter = np.array([])
         # print(spikes_array)
         # print(times)
 
-        spikes_array[16:] = 0
-        spikes_array[16:, 5] = 1
-
         spikes = {
             # bus to ram
-            14: times[:16] + 2 * ht,
+            14: bus_to_ram,
             # bus to counter
-            # 15: np.array([]),
-            15: times[16:] + 2 * ht,
-            # bus to cpu
-            16: np.array([]),
+            15: bus_to_counter,
             # start
-            # 17: np.array([10]),
-            17: times[-1:] + 10 * ht
+            # 16: np.array([10]),
+            16: times[-1:] + 10 * ht
         }
 
         save_spikes_for_doryta(dump_folder / 'spikes' / f'computer_8bit_v1-{name}',
-                               img=spikes_array[:, -1::-1], times=times,
+                               img=spikes_array[:, ::-1], times=times,
                                individual_spikes=spikes)
