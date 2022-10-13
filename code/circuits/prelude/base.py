@@ -10,7 +10,11 @@ from ..snvisualize import SNCreateVisual
 from ..visualize.base import CircuitDisplay
 
 
-def asr_latch(heartbeat: float, noQ: bool = False) -> SNCreate:
+def asr_latch(
+    heartbeat: float,
+    noQ: bool = False,
+    forget_after_activation: bool = False
+) -> SNCreate:
     inf = 2e20
     with SNCreate(
         neuron_type=LIF,
@@ -30,7 +34,8 @@ def asr_latch(heartbeat: float, noQ: bool = False) -> SNCreate:
         snc.input("reset",    synapses={"memory": {"weight": 1.0}})
         snc.neuron("a", synapses={"memory", "q"})
         snc.neuron("memory", params={"resistance": inf}, synapses={"q"})
-        snc.neuron("q")
+        q_synaps = {'memory'} if forget_after_activation else set()
+        snc.neuron("q", synapses=q_synaps)
 
         if noQ:
             snc.output("no-q")
@@ -688,7 +693,7 @@ def all_glued_but_CPU(  # noqa: C901
         #   - BUS to output connection
         for out_i in bus_outputs['output-circuit'][:n_bits]:
             snc.output(f'BUS.out_{out_i}')
-        snc.output(f'Glued_ALU.out_{n_bits}')  # the flagbit output
+        snc.output(f'Glued_ALU.out_{n_bits}')  # the overflow-bit output
 
         # Connect BUS to all four of its components and assign output as output of the whole circuit
         #   - Connecting BUS to Counter and back
@@ -739,7 +744,7 @@ class DFA(NamedTuple):
         possible_outputs: set[str] | None = None
     ) -> str | None:
         if possible_inputs is None:
-            possible_inputs = {'activate', 'flagbit-result'}
+            possible_inputs = {'activate', 'overflow-bit-result'}
         else:
             possible_inputs = possible_inputs | {'activate'}
         if possible_outputs is None:
@@ -747,7 +752,7 @@ class DFA(NamedTuple):
                 'bus-to-ram', 'bus-to-regA', 'bus-to-regB', 'bus-to-counter',
                 'bus-to-cpu', 'bus-to-output', 'counter-to-bus', 'clean-counter',
                 'increment-counter', 'activate-alu', 'regA-to-bus', 'clean-regA',
-                'clean-regB', 'get-flagbit',
+                'clean-regB', 'get-overflow-bit',
                 'additional_to_store_0', 'additional_to_store_1', 'store_to_bus',
                 'continuation', 'cleanup'}
         else:
@@ -929,7 +934,7 @@ class DFA(NamedTuple):
                 # set counter
                 'store_to_bus': 1,
                 'bus-to-counter': 4,
-                # # restore reset bit
+                # exiting
                 'cleanup': 5
             }
             snc.input("activate", synapses={
@@ -939,6 +944,52 @@ class DFA(NamedTuple):
             for neu in sequence:
                 snc.output(neu)
                 snc.neuron(neu)
+        return DFA(snc.circuit, {out: i for i, out in enumerate(sequence)})
+
+    @classmethod
+    def jo(cls, heartbeat: float, negate: bool = False) -> DFA:
+        latch = asr_latch(heartbeat, noQ=True, forget_after_activation=True)
+        with SNCreate(
+            neuron_type=LIF,
+            neuron_params={"resistance": 1.0, "capacitance": heartbeat, "threshold": 0.8},
+            synapse_params={"weight": 1.0, "delay": 1}
+        ) as snc:
+            snc.input('activate', synapses={
+                'get-overflow-bit': {'delay': 1},
+                'delaying-latch-activate': {'delay': 30}
+            }, inputs={'DecisionLatch.reset'})
+            snc.input('overflow-bit-result', inputs={'DecisionLatch.set'})
+
+            snc.neuron('delaying-latch-activate', to_inputs={'DecisionLatch.activate'})
+            # Change counter with value stored in memory
+            sequence: dict[str, int] = {
+                # clean counter
+                'clean-counter': 1,
+                # set counter
+                'store_to_bus': 1,
+                'bus-to-counter': 4,
+                # exiting
+                'cleanup': 5
+            }
+            snc.neuron("jump-counter", synapses={
+                name: {'delay': syn} for name, syn in sequence.items()})
+
+            if negate:
+                snc.connection('DecisionLatch.out_1', 'jump-counter', synapse_params={})
+                snc.connection('DecisionLatch.out_0', 'continuation', synapse_params={})
+            else:
+                snc.connection('DecisionLatch.out_0', 'jump-counter', synapse_params={})
+                snc.connection('DecisionLatch.out_1', 'continuation', synapse_params={})
+
+            # Adding neuron info (not to be connected to 'jump-counter')
+            sequence['get-overflow-bit'] = -1
+            sequence['continuation'] = -1
+            # defining outputs and neurons
+            for neu in sequence:
+                snc.output(neu)
+                snc.neuron(neu)
+
+            snc.include("DecisionLatch", latch.circuit)
         return DFA(snc.circuit, {out: i for i, out in enumerate(sequence)})
 
 
@@ -955,19 +1006,19 @@ def control_unit(  # noqa: C901
             '0000': DFA.lda(heartbeat),
             '0001': DFA.add(heartbeat),
             '0011': DFA.clr(heartbeat),
+            '0100': DFA.jo(heartbeat),
             '0111': DFA.nop(heartbeat),
             '1010': DFA.sta(heartbeat),
             '1011': DFA.jmp(heartbeat),
+            '1100': DFA.jo(heartbeat, negate=True),
             '1110': DFA.out(heartbeat),
             '1111': DFA.halt(),
             # ---
             # '0010': DFA.nop(heartbeat),
-            # '0100': DFA.nop(heartbeat),
             # '0101': DFA.nop(heartbeat),
             # '0110': DFA.nop(heartbeat),
             # '1000': DFA.nop(heartbeat),
             # '1001': DFA.nop(heartbeat),
-            # '1100': DFA.nop(heartbeat),
             # '1101': DFA.nop(heartbeat),
         }
     # checking DFAS
@@ -981,7 +1032,7 @@ def control_unit(  # noqa: C901
         outputs = ['bus-to-ram', 'bus-to-regA', 'bus-to-regB', 'bus-to-counter',
                    'bus-to-cpu', 'bus-to-output', 'counter-to-bus', 'clean-counter',
                    'increment-counter', 'activate-alu', 'regA-to-bus', 'clean-regA',
-                   'clean-regB', 'get-flagbit', 'store_to_bus_0', 'store_to_bus_1',
+                   'clean-regB', 'get-overflow-bit', 'store_to_bus_0', 'store_to_bus_1',
                    'store_to_bus_2', 'store_to_bus_3', 'additional_to_bus_0',
                    'additional_to_bus_1']
     dfa_connections = {
@@ -1061,7 +1112,11 @@ def control_unit(  # noqa: C901
         for i in range(1, 4):
             snc.input(f"from_nbus_{i}", synapses={f"ninst-{i}-0", f"ninst-{i}-1"})
 
-        snc.input('flagbit-result', inputs=[])
+        snc.input('overflow-bit-result', inputs=[
+            f'DFA_{suffix}.overflow-bit-result'
+            for suffix, dfa in dfas.items()
+            if 'overflow-bit-result' in dfa.circuit.inputs_id
+        ])
 
         # Building addressing structure
         _finding_address_helper(current_bit=1, suffix="0")
@@ -1192,7 +1247,7 @@ def computer_8bit(  # noqa: C901
                              ('count-up', 'increment-counter')]),
                 ('Glued_ALU', [('alu', 'activate-alu'), ('regA-bus', 'regA-to-bus'),
                                ('regA-reset', 'clean-regA'), ('regB-reset', 'clean-regB'),
-                               ('flag-read', 'get-flagbit')]),
+                               ('flag-read', 'get-overflow-bit')]),
         ]:
             for input, cpu_output in input_list:
                 out_i = control_unit_output[cpu_output]
@@ -1202,7 +1257,7 @@ def computer_8bit(  # noqa: C901
             snc.connection(f'BUS.out_{out_i}', f'ControlUnit.from_bus_{i}')
         for i, out_i in enumerate(bus_outputs['cpu-no-q'][4:n_bits]):
             snc.connection(f'BUS.out_{out_i}', f'ControlUnit.from_nbus_{i}')
-        snc.connection(f'Glued_ALU.out_{n_bits}', 'ControlUnit.flagbit-result')
+        snc.connection(f'Glued_ALU.out_{n_bits}', 'ControlUnit.overflow-bit-result')
 
         # Including parts
         for circuit_name, circuit in [

@@ -664,10 +664,30 @@ if False and __name__ == '__main__':
              print_dummy=True)
 
 
-# Testing control unit
+# Testing jno instruction
 if False and __name__ == '__main__':
+    # > src/doryta --spike-driven \
+    # > --load-model=../data/models/snn-circuits/snn-models/jno.doryta.bin \
+    # > --load-spikes=../data/models/snn-circuits/spikes/jno.bin \
+    # > --probe-firing{,-output-only} --output-dir=testing-8-bit/jno \
+    # > --save-state --end=20
+
     ht = 1/256
-    control_unit = base.control_unit(ht)
+    jno = base.DFA.jo(ht, negate=True)
+    # jno = base.DFA.jmp(ht)
+
+    save(jno.circuit, dump_folder / 'snn-models' / 'jno.doryta.bin',
+         heartbeat=ht, verbose=True)
+
+    spikes = {
+        # activate
+        0: np.array([ht]),
+        # overflow-bit-result
+        1: np.array([6*ht])
+    }
+
+    save_spikes_for_doryta(dump_folder / 'spikes' / 'jno',
+                           individual_spikes=spikes)
 
 
 def content(mnemonic: str, data: int = 0) -> int:
@@ -764,12 +784,24 @@ if True and __name__ == '__main__':
             ('LDA', 0x9),          # 0xB
             ('ADD', 0xF),          # 0xC
             ('STA', 0x9),          # 0xD
-            ('JMP', 0x9),          # 0xE
+            ('JO', 0x9),           # 0xE
             ('DATA', 0xFF),        # 0xF
+        ],
+        # outputs 15, 30, 45 ... until it overflows, then it outputs 42 and ends
+        'test-jno': [
+            ('LDA', 0x7),          # 0x0
+            ('ADD', 0x7),          # 0x1
+            ('OUT'),               # 0x2
+            ('JNO', 0x1),          # 0x3
+            ('LDA', 0x8),          # 0x4
+            ('OUT'),               # 0x5
+            ('HLT'),               # 0x6
+            ('DATA', 0x0F),        # 0x7
+            ('DATA', 42),          # 0x8
         ],
     }
     addresses_start: dict[str, int] = {
-        'hello-world': 0x9
+        'hello-world': 0x9,
     }
 
     for name, program in programs.items():
@@ -785,7 +817,7 @@ if True and __name__ == '__main__':
             assert addresses_start[name] & 0xF == address, \
                 f"The address {address} is larger than 4 bits"
 
-            spikes_array[-1, 2:6] = np.array(list(f"{address:4b}"), dtype='u1')
+            spikes_array[-1, 2:6] = np.array(list(f"{address:04b}"), dtype='u1')
             bus_to_ram = times[:-1] + 2 * ht
             bus_to_counter = times[-1:] + 2 * ht
         else:
