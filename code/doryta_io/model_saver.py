@@ -814,7 +814,7 @@ class ModelSaverLayers(object):
         # -- File format
         if self.neuron_type == LIFParams:
             fh.write(struct.pack('>H', 0x2))
-        if self.neuron_type == LIFPassThruParams:
+        elif self.neuron_type == LIFPassThruParams:
             fh.write(struct.pack('>H', 0x32))
         else:
             raise Exception(f"Unknown neuron type {type(self.neuron_type)}")

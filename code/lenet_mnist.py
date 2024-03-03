@@ -15,7 +15,7 @@ from enum import Enum
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.models import load_model
 from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPool2D
-from tensorflow.keras.optimizers import Adadelta
+from tensorflow.keras.optimizers.legacy import Adadelta
 from tensorflow.keras import Model
 
 from .whetstone.layers import Spiking_BRelu, Softmax_Decode, key_generator
@@ -120,7 +120,7 @@ if __name__ == '__main__':  # noqa: C901
     initializer = 'glorot_uniform'
     # initializer = RandomUniform(minval=0.0, maxval=1.0)
 
-    nn_mode = NNMode.PIECES
+    nn_mode = NNMode.REGULAR
 
     checking_model = False
 
