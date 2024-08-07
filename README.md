@@ -27,3 +27,19 @@ mpirun -np 2 path_to/doryta --load-model=models/whetstone/lenet-mnist-filters=6,
     --end=19.9 --probe-firing-output-only --synch=2 --output-dir=lenet-20 \
     --probe-firing-buffer=100000
 ```
+
+Running GoL with die-hard 2500 pattern:
+
+```bash
+mpirun -np 2 path_to/doryta --sync=2 --extramem=45000 \
+    --load-spikes=models/gol/spikes/128x128/gol-die-hard-2500.bin \
+    --probe-firing --probe-firing-buffer=2000000 --end=2600 \
+    --gol-model --gol-model-size=128 --spike-driven
+```
+
+And visualize GoL in action:
+
+```bash
+python path_to/doryta/tools/gol/show_state.py --path "output/" \
+    --size 128 --speed 10
+```
